@@ -346,13 +346,24 @@ export function useOnboarding() {
   }, []);
 
   const completeNotionAuth = useCallback(
-    async (simulatedCode = 'notion_auth_code_mock') => {
-      if (!state.deviceId) return;
+    async (code = 'notion_auth_code_mock', stateToken?: string) => {
+      let targetDeviceId = state.deviceId;
+      if (!targetDeviceId && stateToken && stateToken.startsWith('state_')) {
+        const parts = stateToken.split('_');
+        if (parts.length >= 2) {
+          targetDeviceId = parts[1];
+        }
+      }
+      if (!targetDeviceId) {
+        targetDeviceId = localStorage.getItem('nova_device_id') || 'nova_c3_84f3eba1';
+      }
+
       try {
         const res = await apiClient.callbackNotion({
-          code: simulatedCode,
-          state: 'state_mock',
-          deviceId: state.deviceId,
+          code,
+          state: stateToken || 'state_mock',
+          deviceId: targetDeviceId,
+          redirectUri: window.location.origin + '/',
         });
 
         if (res.success && res.data) {
@@ -360,6 +371,17 @@ export function useOnboarding() {
             type: 'NOTION_AUTH_SUCCESS',
             notionInfo: res.data,
           });
+
+          // Fetch full telemetry to hydrate dashboard
+          const statusRes = await apiClient.getDeviceStatus(targetDeviceId);
+          if (statusRes.success && statusRes.data) {
+            dispatch({
+              type: 'UPDATE_TELEMETRY',
+              telemetry: statusRes.data.device,
+              wifi: statusRes.data.wifi,
+              notion: res.data,
+            });
+          }
         } else {
           dispatch({
             type: 'SET_ERROR',

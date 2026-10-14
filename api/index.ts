@@ -428,22 +428,18 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 5. POST /api/v1/auth/notion/authorize
+    // 5. POST / GET /api/v1/auth/notion/authorize
     // =========================================================================
-    if (pathname === '/api/v1/auth/notion/authorize' && method === 'POST') {
-      const deviceId = req.body?.deviceId as string;
+    if (pathname === '/api/v1/auth/notion/authorize') {
+      const deviceId =
+        (req.body?.deviceId as string) ||
+        url.searchParams.get('deviceId') ||
+        'nova_c3_84f3eba1';
       const redirectUri =
         (req.body?.redirectUri as string) ||
+        url.searchParams.get('redirect_uri') ||
         process.env.NOTION_REDIRECT_URI ||
-        `${url.origin}/api/v1/auth/notion/callback`;
-
-      if (!deviceId) {
-        sendJson(res, 400, {
-          success: false,
-          error: { code: 'MISSING_DEVICE_ID', message: 'Device ID is required to authorize Notion.' },
-        });
-        return;
-      }
+        'https://buynovastore.vercel.app/';
 
       const clientId = process.env.NOTION_CLIENT_ID;
       if (!clientId) {
@@ -463,10 +459,18 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         state: stateToken,
       });
 
+      const authorizationUrl = `https://api.notion.com/v1/oauth/authorize?${params.toString()}`;
+
+      if (method === 'GET') {
+        res.writeHead(302, { Location: authorizationUrl });
+        res.end();
+        return;
+      }
+
       sendJson(res, 200, {
         success: true,
         data: {
-          authorizationUrl: `https://api.notion.com/v1/oauth/authorize?${params.toString()}`,
+          authorizationUrl,
           stateToken,
         },
       });
@@ -474,27 +478,39 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 6. GET /api/v1/auth/notion/callback
+    // 6. POST / GET /api/v1/auth/notion/callback
     // =========================================================================
-    if (pathname === '/api/v1/auth/notion/callback' && method === 'GET') {
-      const code = url.searchParams.get('code');
-      const state = url.searchParams.get('state') || '';
-      const redirectUri = process.env.NOTION_REDIRECT_URI || `${url.origin}/api/v1/auth/notion/callback`;
+    if (pathname === '/api/v1/auth/notion/callback') {
+      const code = (req.body?.code as string) || url.searchParams.get('code');
+      const state = (req.body?.state as string) || url.searchParams.get('state') || '';
+      const redirectUri =
+        (req.body?.redirectUri as string) ||
+        url.searchParams.get('redirect_uri') ||
+        process.env.NOTION_REDIRECT_URI ||
+        'https://buynovastore.vercel.app/';
 
       if (!code) {
         const error = url.searchParams.get('error') || 'OAuth authorization cancelled';
+        if (method === 'POST') {
+          sendJson(res, 400, { success: false, error: { code: 'OAUTH_ERROR', message: error } });
+          return;
+        }
         res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(error)}` });
         res.end();
         return;
       }
 
       const stateParts = state.split('_');
-      const deviceId = stateParts.length >= 2 ? stateParts[1] : 'nova_c3_84f3eba1';
+      const deviceId = (req.body?.deviceId as string) || (stateParts.length >= 2 ? stateParts[1] : 'nova_c3_84f3eba1');
 
       const clientId = process.env.NOTION_CLIENT_ID;
       const clientSecret = process.env.NOTION_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
+        if (method === 'POST') {
+          sendJson(res, 500, { success: false, error: { code: 'NOTION_NOT_CONFIGURED', message: 'Notion integration credentials missing on server.' } });
+          return;
+        }
         res.writeHead(302, { Location: '/?notion_auth=error&message=Notion+client+credentials+missing' });
         res.end();
         return;
@@ -552,6 +568,23 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           tokenData.owner?.user?.person?.email || null,
         ]);
 
+        if (method === 'POST') {
+          sendJson(res, 200, {
+            success: true,
+            data: {
+              isConnected: true,
+              workspaceId: tokenData.workspace_id,
+              workspaceName: tokenData.workspace_name,
+              workspaceIcon: tokenData.workspace_icon,
+              ownerEmail: tokenData.owner?.user?.person?.email || null,
+              botId: tokenData.bot_id,
+              targetDatabaseName: 'NOVA Notes & Voice Inbox',
+              connectedAt: new Date().toISOString(),
+            },
+          });
+          return;
+        }
+
         res.writeHead(302, {
           Location: `/?notion_auth=success&workspace=${encodeURIComponent(tokenData.workspace_name || 'Notion')}&deviceId=${encodeURIComponent(deviceId)}`,
         });
@@ -559,6 +592,10 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to authorize Notion';
+        if (method === 'POST') {
+          sendJson(res, 502, { success: false, error: { code: 'NOTION_API_ERROR', message: msg } });
+          return;
+        }
         res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(msg)}` });
         res.end();
         return;

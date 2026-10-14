@@ -7,6 +7,8 @@ import { EventEmitter } from 'events';
 beforeAll(() => {
   process.env.DATABASE_URL = 'postgres://nova_app.jcwlxiujyjlessgfwjgu:REDACTED_HISTORICAL_SECRET@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
   process.env.NOTION_ENCRYPTION_KEY = '349012380b9249f86678fb09da0f43daf380cba2612233e6a565eb73c7f00aaf';
+  process.env.NOTION_CLIENT_ID = '3f9d872b-594c-81fe-b945-00373d142af3';
+  process.env.NOTION_REDIRECT_URI = 'https://buynovastore.vercel.app/';
 });
 
 // Lightweight helper to simulate Node HTTP req/res on the serverless handler
@@ -180,5 +182,30 @@ describe('NOVA Backend Real Database & Hardware Integration API', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
     expect(res.body.error?.code).toBe('NOTION_NOT_CONNECTED');
+  });
+
+  it('POST /api/v1/auth/notion/authorize returns configured Notion OAuth URL', async () => {
+    const res = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/authorize',
+      body: {
+        deviceId: 'nova_c3_84f3eba1',
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.authorizationUrl).toContain('client_id=3f9d872b-594c-81fe-b945-00373d142af3');
+    expect(res.body.data.authorizationUrl).toContain('redirect_uri=https%3A%2F%2Fbuynovastore.vercel.app%2F');
+    expect(res.body.data.stateToken).toMatch(/^state_nova_c3_84f3eba1_/);
+  });
+
+  it('POST /api/v1/devices/:id/notion/disconnect safely disconnects Notion', async () => {
+    const res = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/nova_c3_84f3eba1/notion/disconnect',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.disconnected).toBe(true);
   });
 });

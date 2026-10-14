@@ -4,34 +4,49 @@ import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { NOTION_REQUESTED_SCOPES, NOTION_EXCLUDED_PERMISSIONS } from '../../domain/notion';
 import { ShieldCheck, Lock, ExternalLink, CheckCircle2, ChevronRight } from 'lucide-react';
+import { apiClient } from '../../api/client';
 
 export interface NotionAuthScreenProps {
-  onCompleteAuth: (simulatedCode?: string) => Promise<void>;
+  onCompleteAuth: (code?: string, state?: string) => Promise<void>;
   isMockMode?: boolean;
+  deviceId?: string;
 }
 
 export const NotionAuthScreen: React.FC<NotionAuthScreenProps> = ({
   onCompleteAuth,
   isMockMode = true,
+  deviceId,
 }) => {
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [selectedDatabase, setSelectedDatabase] = useState('db_voice_inbox');
   const [isAuthorizing, setIsAuthorizing] = useState(false);
 
-  const handleStartOAuth = () => {
+  const handleStartOAuth = async () => {
     if (isMockMode) {
       setIsConsentModalOpen(true);
     } else {
-      // Real backend redirect flow
-      window.location.href = `/api/v1/auth/notion/authorize?redirect_uri=${encodeURIComponent(
-        window.location.origin + '/setup/callback'
-      )}`;
+      setIsAuthorizing(true);
+      try {
+        const res = await apiClient.authorizeNotion({
+          deviceId: deviceId || 'nova_c3_84f3eba1',
+          redirectUri: window.location.origin + '/',
+        });
+        if (res.success && res.data?.authorizationUrl) {
+          window.location.href = res.data.authorizationUrl;
+        } else {
+          alert(res.error?.message || 'Failed to initialize Notion OAuth session.');
+          setIsAuthorizing(false);
+        }
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : 'Failed to connect to Notion.');
+        setIsAuthorizing(false);
+      }
     }
   };
 
   const handleApproveConsent = async () => {
     setIsAuthorizing(true);
-    await onCompleteAuth(`code_notion_verified_${selectedDatabase}`);
+    await onCompleteAuth(`code_notion_verified_${selectedDatabase}`, 'state_mock');
     setIsAuthorizing(false);
     setIsConsentModalOpen(false);
   };
@@ -125,6 +140,7 @@ export const NotionAuthScreen: React.FC<NotionAuthScreenProps> = ({
       <Button
         variant="primary"
         onClick={handleStartOAuth}
+        isLoading={isAuthorizing}
         leftIcon={<ExternalLink size={18} />}
         rightIcon={<ChevronRight size={18} />}
       >

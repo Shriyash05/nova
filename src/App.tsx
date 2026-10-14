@@ -8,6 +8,7 @@ import { Card } from './components/common/Card';
 import { Button } from './components/common/Button';
 import { NovaDeviceMockup } from './components/hardware/NovaDeviceMockup';
 import { apiClient } from './api/client';
+import { mockBackendStore } from './api/mockApi';
 
 // Flow Screens
 import { WelcomeScreen } from './components/flows/WelcomeScreen';
@@ -44,17 +45,24 @@ export const App: React.FC = () => {
 
   const [isDevDrawerOpen, setIsDevDrawerOpen] = useState(false);
 
-  // Check URL query parameters on initial mount (e.g. QR code scan direct link or OAuth callback)
+  // Check URL query parameters on initial mount (QR code scan or Notion OAuth callback)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const oauthCode = params.get('code');
+    const oauthState = params.get('state');
     const token = params.get('claim_token') || params.get('token');
-    const code = params.get('short_code') || params.get('code');
+    const shortCode = params.get('short_code');
     const notionCallback = params.get('notion_auth');
 
-    if (token || code) {
-      submitClaim(token || code || '');
+    // 1. Notion OAuth callback redirect (?code=...&state=...)
+    if (oauthCode && oauthState) {
+      completeNotionAuth(oauthCode, oauthState);
+      window.history.replaceState({}, document.title, window.location.pathname);
     } else if (notionCallback === 'success') {
-      completeNotionAuth('real_oauth_redirect_code');
+      completeNotionAuth('oauth_success_redirect');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (token || shortCode) {
+      submitClaim(token || shortCode || '');
     }
   }, [submitClaim, completeNotionAuth]);
 
@@ -126,6 +134,7 @@ export const App: React.FC = () => {
 
         {state.step === 'NOTION_AUTH_EXPLAIN' && (
           <NotionAuthScreen
+            deviceId={state.deviceId || 'nova_c3_84f3eba1'}
             onCompleteAuth={completeNotionAuth}
             isMockMode={apiClient.isMockMode()}
           />
@@ -133,6 +142,7 @@ export const App: React.FC = () => {
 
         {state.step === 'NOTION_AUTH_CONSENT' && (
           <NotionAuthScreen
+            deviceId={state.deviceId || 'nova_c3_84f3eba1'}
             onCompleteAuth={completeNotionAuth}
             isMockMode={apiClient.isMockMode()}
           />
@@ -146,11 +156,11 @@ export const App: React.FC = () => {
           />
         )}
 
-        {state.step === 'DASHBOARD' && state.deviceTelemetry && state.wifiStatus && state.notionInfo && (
+        {state.step === 'DASHBOARD' && (
           <DeviceDashboardScreen
-            telemetry={state.deviceTelemetry}
-            wifi={state.wifiStatus}
-            notion={state.notionInfo}
+            telemetry={state.deviceTelemetry || mockBackendStore.getTelemetry()}
+            wifi={state.wifiStatus || mockBackendStore.getWifi()}
+            notion={state.notionInfo || mockBackendStore.getNotion()}
             onStartWifiRecovery={startWifiRecovery}
             onRefreshStatus={refreshStatus}
             onTestSync={testSync}

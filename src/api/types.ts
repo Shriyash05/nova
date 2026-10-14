@@ -65,6 +65,7 @@ export interface NotionCallbackPayload {
   code: string;
   state: string;
   deviceId: DeviceId;
+  redirectUri?: string;
 }
 
 export interface NotionDisconnectPayload {
