@@ -355,7 +355,7 @@ export function useOnboarding() {
         }
       }
       if (!targetDeviceId) {
-        targetDeviceId = localStorage.getItem('nova_device_id') || 'nova_c3_84f3eba1';
+        targetDeviceId = localStorage.getItem('nova_device_id') || 'nova-c3-5c20dc4239fca9ec';
       }
 
       try {

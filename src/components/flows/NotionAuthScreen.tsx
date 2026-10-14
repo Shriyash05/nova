@@ -28,7 +28,7 @@ export const NotionAuthScreen: React.FC<NotionAuthScreenProps> = ({
       setIsAuthorizing(true);
       try {
         const res = await apiClient.authorizeNotion({
-          deviceId: deviceId || 'nova_c3_84f3eba1',
+          deviceId: deviceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_device_id') : null) || 'nova-c3-5c20dc4239fca9ec',
           redirectUri: window.location.origin + '/',
         });
         if (res.success && res.data?.authorizationUrl) {

@@ -21,7 +21,7 @@ describe('Nova API Client & Mock Store', () => {
   it('successfully claims device with valid token and issues pairingSessionId', async () => {
     const res = await mockApi.claimDevice({ claimToken: 'clm_live_9f82d1c74a0e' });
     expect(res.success).toBe(true);
-    expect(res.data?.deviceId).toBe('nova_c3_84f3eba1');
+    expect(res.data?.deviceId).toBe('nova-c3-5c20dc4239fca9ec');
     expect(res.data?.pairingSessionId).toMatch(/^sess_/);
     expect(res.data?.expiresInSeconds).toBe(900);
   });
@@ -34,7 +34,7 @@ describe('Nova API Client & Mock Store', () => {
     expect(res.success).toBe(true);
     expect(res.data?.status).toBe('connected');
 
-    const statusRes = await mockApi.getDeviceStatus('nova_c3_84f3eba1');
+    const statusRes = await mockApi.getDeviceStatus('nova-c3-5c20dc4239fca9ec');
     expect(statusRes.data?.wifi.connectedSsid).toBe('QuantumLabs-2.4G');
     expect(statusRes.data?.device.status).toBe('online');
   });
@@ -52,7 +52,7 @@ describe('Nova API Client & Mock Store', () => {
     const res = await mockApi.callbackNotion({
       code: 'code_mock_123',
       state: 'state_123',
-      deviceId: 'nova_c3_84f3eba1',
+      deviceId: 'nova-c3-5c20dc4239fca9ec',
     });
     expect(res.success).toBe(true);
     expect(res.data?.isConnected).toBe(true);
@@ -63,15 +63,15 @@ describe('Nova API Client & Mock Store', () => {
     const disconnectRes = await mockApi.disconnectNotion({ confirm: true, revokeToken: true });
     expect(disconnectRes.success).toBe(true);
 
-    const statusRes = await mockApi.getDeviceStatus('nova_c3_84f3eba1');
+    const statusRes = await mockApi.getDeviceStatus('nova-c3-5c20dc4239fca9ec');
     expect(statusRes.data?.notion.isConnected).toBe(false);
     // Device hardware must still exist
-    expect(statusRes.data?.device.deviceId).toBe('nova_c3_84f3eba1');
+    expect(statusRes.data?.device.deviceId).toBe('nova-c3-5c20dc4239fca9ec');
   });
 
   it('runs synthetic voice note sync test and returns confirmation', async () => {
     // Re-link Notion first
-    await mockApi.callbackNotion({ code: 'test', state: 'test', deviceId: 'nova_c3_84f3eba1' });
+    await mockApi.callbackNotion({ code: 'test', state: 'test', deviceId: 'nova-c3-5c20dc4239fca9ec' });
     const syncRes = await mockApi.testSync();
     expect(syncRes.success).toBe(true);
     expect(syncRes.data?.pageUrl).toContain('notion.so');

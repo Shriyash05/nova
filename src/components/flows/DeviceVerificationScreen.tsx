@@ -78,7 +78,7 @@ export const DeviceVerificationScreen: React.FC<DeviceVerificationScreenProps> =
               </div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 IP: <span className="font-mono">{wifi?.ipAddress || '192.168.1.188'}</span> • MAC:{' '}
-                <span className="font-mono">{wifi?.macAddress || '84:F3:EB:A1:0C:4A'}</span>
+                <span className="font-mono">{wifi?.macAddress || '48:F6:EE:17:34:D8'}</span>
               </div>
             </div>
           </div>

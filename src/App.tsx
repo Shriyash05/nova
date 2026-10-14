@@ -112,6 +112,8 @@ export const App: React.FC = () => {
 
         {state.step === 'WIFI_METHOD_SELECT' && (
           <WifiProvisionScreen
+            deviceId={state.deviceId || undefined}
+            pairingSessionId={state.pairingSessionId || undefined}
             onProvision={provisionWifi}
             onScanNetworks={scanWifiNetworks}
           />
@@ -119,6 +121,8 @@ export const App: React.FC = () => {
 
         {state.step === 'WIFI_PROVISION' && (
           <WifiProvisionScreen
+            deviceId={state.deviceId || undefined}
+            pairingSessionId={state.pairingSessionId || undefined}
             onProvision={provisionWifi}
             onScanNetworks={scanWifiNetworks}
           />
@@ -134,7 +138,7 @@ export const App: React.FC = () => {
 
         {state.step === 'NOTION_AUTH_EXPLAIN' && (
           <NotionAuthScreen
-            deviceId={state.deviceId || 'nova_c3_84f3eba1'}
+            deviceId={state.deviceId || ''}
             onCompleteAuth={completeNotionAuth}
             isMockMode={apiClient.isMockMode()}
           />
@@ -142,7 +146,7 @@ export const App: React.FC = () => {
 
         {state.step === 'NOTION_AUTH_CONSENT' && (
           <NotionAuthScreen
-            deviceId={state.deviceId || 'nova_c3_84f3eba1'}
+            deviceId={state.deviceId || ''}
             onCompleteAuth={completeNotionAuth}
             isMockMode={apiClient.isMockMode()}
           />

@@ -38,9 +38,13 @@ interface DeviceRecord {
   hardware_model: string;
   firmware_version: string;
   status: string;
+  device_secret?: string | null;
   ip_address: string | null;
+  wifi_connected?: boolean | null;
   wifi_ssid: string | null;
   wifi_rssi: number | null;
+  oled_state?: string | null;
+  queue_count?: number | null;
   last_heartbeat: string | null;
   created_at: string;
   updated_at: string;
@@ -158,6 +162,110 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
+function getHeader(req: IncomingMessage, name: string): string | undefined {
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (k.toLowerCase() === lower && typeof v === 'string') {
+      return v;
+    }
+  }
+  return undefined;
+}
+
+// -----------------------------------------------------------------------------
+// Authentication Helper: Authenticates device requests against PostgreSQL
+// Accepts:
+// 1. Device credential (devices.device_secret) - used by firmware (heartbeat/status)
+// 2. Active pairing session (pairing_sessions.id) - used by web client (status/sync/disconnect)
+// Returns:
+// - 401 if token is absent, malformed, expired, or unknown
+// - 403 if credential/session belongs to a different device than targetDeviceId
+// - 200 / authorized: true on successful match
+// -----------------------------------------------------------------------------
+interface AuthCheckResult {
+  authorized: boolean;
+  status: 401 | 403 | 200;
+  code?: string;
+  message?: string;
+  authType?: 'device_secret' | 'session';
+}
+
+async function authenticateDeviceRequest(
+  req: ExtendedRequest,
+  targetDeviceId: string
+): Promise<AuthCheckResult> {
+  const authHeader = getHeader(req, 'authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return {
+      authorized: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'Authentication required. Provide Authorization: Bearer <device session or device credential>.',
+    };
+  }
+
+  const token = authHeader.substring(7).trim();
+  if (!token) {
+    return {
+      authorized: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'Bearer token must not be empty.',
+    };
+  }
+
+  // 1. Check if token matches a device_secret (firmware credential)
+  const deviceBySecret = await queryDb<{ id: string }>(
+    'SELECT id FROM devices WHERE device_secret = $1',
+    [token]
+  );
+  if (deviceBySecret.length > 0) {
+    const credDeviceId = deviceBySecret[0].id;
+    if (credDeviceId === targetDeviceId) {
+      return { authorized: true, status: 200, authType: 'device_secret' };
+    }
+    return {
+      authorized: false,
+      status: 403,
+      code: 'FORBIDDEN',
+      message: `Device credential does not grant access to device '${targetDeviceId}'.`,
+    };
+  }
+
+  // 2. Check if token matches an active pairing_session (web session token)
+  const sessionRows = await queryDb<{ device_id: string; expires_at: string }>(
+    'SELECT device_id, expires_at FROM pairing_sessions WHERE id = $1',
+    [token]
+  );
+  if (sessionRows.length > 0) {
+    const session = sessionRows[0];
+    if (new Date(session.expires_at) < new Date()) {
+      return {
+        authorized: false,
+        status: 401,
+        code: 'SESSION_EXPIRED',
+        message: 'Pairing session has expired. Re-pair your NOVA device.',
+      };
+    }
+    if (session.device_id === targetDeviceId) {
+      return { authorized: true, status: 200, authType: 'session' };
+    }
+    return {
+      authorized: false,
+      status: 403,
+      code: 'FORBIDDEN',
+      message: `Pairing session is not authorized for device '${targetDeviceId}'.`,
+    };
+  }
+
+  return {
+    authorized: false,
+    status: 401,
+    code: 'INVALID_CREDENTIALS',
+    message: 'Invalid or unknown device session or credential.',
+  };
+}
+
 // -----------------------------------------------------------------------------
 // Main Serverless Handler
 // -----------------------------------------------------------------------------
@@ -165,7 +273,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
   // CORS configuration
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-idempotency-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-idempotency-key');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 200;
@@ -183,7 +291,8 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
   try {
     // =========================================================================
-    // 1. GET /api/health
+    // 1. GET /api/health or /api/v1/health
+    // Public health check returning database status and hardware configuration
     // =========================================================================
     if (pathname === '/api/health' || pathname === '/api/v1/health') {
       let dbConnected = false;
@@ -225,34 +334,109 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // 2. POST /api/v1/devices/bootstrap
     // Called over TLS when ESP32-C3 connects to Wi-Fi to register cloud state
     // and generate its single-use 15-minute OLED claim QR token.
+    // Protected by device bootstrap credential.
     // =========================================================================
     if (pathname === '/api/v1/devices/bootstrap' && method === 'POST') {
-      const deviceId = (req.body?.deviceId as string) || 'nova_c3_84f3eba1';
-      const serialNumber = (req.body?.serialNumber as string) || 'NOVA-C3-84F3EBA1';
-      const macAddress = (req.body?.macAddress as string) || '84:F3:EB:A1:0C:4A';
+      const bootstrapSecret =
+        (req.body?.bootstrapSecret as string) ||
+        (req.body?.bootstrapCredential as string) ||
+        (req.headers['x-nova-bootstrap'] as string) ||
+        (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : '');
+
+      const expectedBootstrapSecret = process.env.NOVA_BOOTSTRAP_SECRET || 'nova_sec_c3_hardware_bootstrap_2026';
+      if (!bootstrapSecret || bootstrapSecret !== expectedBootstrapSecret) {
+        sendJson(res, 401, {
+          success: false,
+          error: {
+            code: 'INVALID_BOOTSTRAP_CREDENTIAL',
+            message: 'Invalid or missing device bootstrap credential. Unauthorized device enrollment.',
+          },
+        });
+        return;
+      }
+
+      const deviceId = req.body?.deviceId as string;
+      const macAddress = req.body?.macAddress as string;
+      const firmwareVersion = (req.body?.firmwareVersion as string) || 'v1.0.0-c3';
+      const serialNumber = (req.body?.serialNumber as string) || (deviceId ? `NOVA-C3-${deviceId.replace(/^nova-c3-/, '').toUpperCase()}` : '');
+
+      if (!deviceId || typeof deviceId !== 'string' || !deviceId.trim()) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_DEVICE_ID',
+            message: 'A valid non-empty deviceId string is required (e.g. nova-c3-5c20dc4239fca9ec).',
+          },
+        });
+        return;
+      }
+
+      if (!macAddress || typeof macAddress !== 'string' || !macAddress.trim()) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_MAC_ADDRESS',
+            message: 'A valid non-empty macAddress is required (e.g. 48:F6:EE:17:34:D8).',
+          },
+        });
+        return;
+      }
+
       const wifiSsid = (req.body?.wifiSsid as string) || null;
       const ipAddress = (req.body?.ipAddress as string) || null;
-      const rssi = typeof req.body?.rssi === 'number' ? req.body.rssi : -55;
+      const rssi = typeof req.body?.rssi === 'number' ? req.body.rssi : null;
+
+      // Check if device already has a persistent device_secret, otherwise generate one
+      const existingDevice = await queryDb<{ device_secret: string | null }>(
+        'SELECT device_secret FROM devices WHERE id = $1',
+        [deviceId]
+      );
+      const deviceKey = existingDevice[0]?.device_secret || `dkey_${crypto.randomBytes(16).toString('hex')}`;
 
       // Upsert device in PostgreSQL
       const upsertDeviceSql = `
-        INSERT INTO devices (id, serial_number, mac_address, hardware_model, firmware_version, status, ip_address, wifi_ssid, wifi_rssi, last_heartbeat, updated_at)
-        VALUES ($1, $2, $3, 'ESP32-C3 Super Mini', 'v1.0.0-c3', 'online', $4, $5, $6, NOW(), NOW())
+        INSERT INTO devices (
+          id, serial_number, mac_address, hardware_model, firmware_version,
+          status, device_secret, ip_address, wifi_connected, wifi_ssid, wifi_rssi,
+          oled_state, queue_count, last_heartbeat, updated_at
+        )
+        VALUES (
+          $1, $2, $3, 'ESP32-C3 Super Mini', $4,
+          'online', $5, $6, TRUE, $7, $8,
+          'pairing_qr', 0, NOW(), NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
+          mac_address = EXCLUDED.mac_address,
+          firmware_version = EXCLUDED.firmware_version,
           status = 'online',
-          ip_address = EXCLUDED.ip_address,
-          wifi_ssid = EXCLUDED.wifi_ssid,
-          wifi_rssi = EXCLUDED.wifi_rssi,
+          device_secret = COALESCE(devices.device_secret, EXCLUDED.device_secret),
+          ip_address = COALESCE(EXCLUDED.ip_address, devices.ip_address),
+          wifi_connected = TRUE,
+          wifi_ssid = COALESCE(EXCLUDED.wifi_ssid, devices.wifi_ssid),
+          wifi_rssi = COALESCE(EXCLUDED.wifi_rssi, devices.wifi_rssi),
+          oled_state = 'pairing_qr',
           last_heartbeat = NOW(),
           updated_at = NOW()
         RETURNING *;
       `;
-      const devices = await queryDb<DeviceRecord>(upsertDeviceSql, [deviceId, serialNumber, macAddress, ipAddress, wifiSsid, rssi]);
+      const devices = await queryDb<DeviceRecord>(upsertDeviceSql, [
+        deviceId,
+        serialNumber,
+        macAddress,
+        firmwareVersion,
+        deviceKey,
+        ipAddress,
+        wifiSsid,
+        rssi,
+      ]);
+
+      // Invalidate any unredeemed prior tokens for this device
+      await queryDb('DELETE FROM claim_tokens WHERE device_id = $1 AND is_redeemed = FALSE', [deviceId]);
 
       // Generate ephemeral 15-minute claim token for OLED QR
       const randomSuffix = crypto.randomBytes(4).toString('hex');
       const token = `clm_live_${randomSuffix}`;
-      const shortCode = `NOV-${randomSuffix.toUpperCase().substring(0, 4)}`;
+      const shortCode = `NOV-${randomSuffix.toUpperCase()}`;
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
       await queryDb(
@@ -266,9 +450,13 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         data: {
           deviceId,
           serialNumber: devices[0]?.serial_number || serialNumber,
+          macAddress: devices[0]?.mac_address || macAddress,
+          firmwareVersion: devices[0]?.firmware_version || firmwareVersion,
           claimToken: token,
           shortCode,
           expiresAt,
+          expiresInSeconds: 900,
+          deviceKey: devices[0]?.device_secret || deviceKey,
           portalUrl: `https://buynovastore.vercel.app/?token=${token}`,
         },
       });
@@ -276,8 +464,95 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 3. POST /api/v1/devices/claim
-    // Validates 15-minute ephemeral token and grants durable session
+    // 3. POST /api/v1/devices/:deviceId/heartbeat
+    // Firmware telemetry endpoint. Authenticated via deviceKey.
+    // Accepts non-secret telemetry: firmwareVersion, wifiConnected, rssi, ipAddress, queueCount, oledState.
+    // =========================================================================
+    const heartbeatMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/heartbeat$/);
+    if (heartbeatMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(heartbeatMatch[1]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, {
+          success: false,
+          error: { code: auth.code, message: auth.message },
+        });
+        return;
+      }
+
+      // Strictly reject/strip any Wi-Fi passwords or secrets
+      const telemetry = req.body || {};
+      if ('password' in telemetry || 'wifiPassword' in telemetry || 'passphrase' in telemetry) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_TELEMETRY',
+            message: 'Heartbeat must only contain non-secret telemetry. Do not send Wi-Fi credentials to cloud APIs.',
+          },
+        });
+        return;
+      }
+
+      const firmwareVersion = typeof telemetry.firmwareVersion === 'string' ? telemetry.firmwareVersion : null;
+      const wifiConnected = typeof telemetry.wifiConnected === 'boolean' ? telemetry.wifiConnected : true;
+      const rssi = typeof telemetry.rssi === 'number' ? telemetry.rssi : null;
+      const ipAddress = typeof telemetry.ipAddress === 'string' ? telemetry.ipAddress : null;
+      const queueCount = typeof telemetry.queueCount === 'number' ? Math.max(0, telemetry.queueCount) : 0;
+      const oledState = typeof telemetry.oledState === 'string' ? telemetry.oledState : 'idle';
+
+      const updateSql = `
+        UPDATE devices SET
+          firmware_version = COALESCE($2, firmware_version),
+          wifi_connected = COALESCE($3, wifi_connected),
+          wifi_rssi = COALESCE($4, wifi_rssi),
+          ip_address = COALESCE($5, ip_address),
+          queue_count = COALESCE($6, queue_count),
+          oled_state = COALESCE($7, oled_state),
+          status = 'online',
+          last_heartbeat = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *;
+      `;
+      const updatedRows = await queryDb<DeviceRecord>(updateSql, [
+        targetDeviceId,
+        firmwareVersion,
+        wifiConnected,
+        rssi,
+        ipAddress,
+        queueCount,
+        oledState,
+      ]);
+
+      if (updatedRows.length === 0) {
+        sendJson(res, 404, {
+          success: false,
+          error: {
+            code: 'DEVICE_NOT_FOUND',
+            message: `Device with ID '${targetDeviceId}' is not registered. Bootstrap first.`,
+          },
+        });
+        return;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          acknowledged: true,
+          deviceId: targetDeviceId,
+          serverTime: new Date().toISOString(),
+          status: 'online',
+          oledState,
+          queueCount,
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
+    // 4. POST /api/v1/devices/claim
+    // Validates 15-minute ephemeral token and grants durable pairing session
     // =========================================================================
     if (pathname === '/api/v1/devices/claim' && method === 'POST') {
       const claimToken = (req.body?.claimToken as string) || (req.body?.shortCode as string);
@@ -361,30 +636,40 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 4. GET /api/v1/devices/:deviceId/status
+    // 5. GET /api/v1/devices/:deviceId/status
     // Returns truthful live status from PostgreSQL
+    // Requires Bearer authentication (device credential or pairing session).
     // =========================================================================
     const statusMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/status$/);
     if (statusMatch && method === 'GET') {
-      const deviceId = decodeURIComponent(statusMatch[1]);
-      const devices = await queryDb<DeviceRecord>('SELECT * FROM devices WHERE id = $1', [deviceId]);
+      const targetDeviceId = decodeURIComponent(statusMatch[1]);
 
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, {
+          success: false,
+          error: { code: auth.code, message: auth.message },
+        });
+        return;
+      }
+
+      const devices = await queryDb<DeviceRecord>('SELECT * FROM devices WHERE id = $1', [targetDeviceId]);
       if (devices.length === 0) {
         sendJson(res, 404, {
           success: false,
           error: {
             code: 'DEVICE_NOT_FOUND',
-            message: `Device with ID '${deviceId}' is not registered.`,
+            message: `Device with ID '${targetDeviceId}' is not registered.`,
           },
         });
         return;
       }
 
       const device = devices[0];
-      const notionAuths = await queryDb<NotionAuthRecord>('SELECT * FROM notion_authorizations WHERE device_id = $1', [deviceId]);
+      const notionAuths = await queryDb<NotionAuthRecord>('SELECT * FROM notion_authorizations WHERE device_id = $1', [targetDeviceId]);
       const pendingRes = await queryDb<{ count: string }>(
         "SELECT count(*) as count FROM device_actions WHERE device_id = $1 AND status = 'pending'",
-        [deviceId]
+        [targetDeviceId]
       );
       const pendingSyncCount = parseInt(pendingRes[0]?.count || '0', 10);
       const notionAuth = notionAuths[0] || null;
@@ -398,11 +683,14 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
             hardwareModel: device.hardware_model,
             firmwareVersion: device.firmware_version,
             status: device.status,
+            oledState: device.oled_state || 'idle',
+            queueCount: device.queue_count || 0,
             lastHeartbeat: device.last_heartbeat,
             ipAddress: device.ip_address,
           },
           wifi: {
-            state: device.wifi_ssid ? 'connected' : 'disconnected',
+            state: device.wifi_connected || device.wifi_ssid ? 'connected' : 'disconnected',
+            connected: Boolean(device.wifi_connected),
             connectedSsid: device.wifi_ssid,
             rssi: device.wifi_rssi,
             ipAddress: device.ip_address,
@@ -428,13 +716,40 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 5. POST / GET /api/v1/auth/notion/authorize
+    // 6. Wi-Fi Provisioning Guard
+    // Keeps Wi-Fi provisioning strictly local to ESP32-C3 SoftAP (192.168.4.1)
+    // =========================================================================
+    const wifiProvisionMatch = pathname.match(/^\/api\/v1\/(devices\/[^/]+\/)?wifi\/provision$/);
+    if (wifiProvisionMatch && method === 'POST') {
+      sendJson(res, 400, {
+        success: false,
+        error: {
+          code: 'LOCAL_PROVISIONING_ONLY',
+          message: 'Wi-Fi provisioning is strictly local to the ESP32-C3 SoftAP at http://192.168.4.1. The cloud API does not accept or store Wi-Fi credentials.',
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
+    // 7. POST / GET /api/v1/auth/notion/authorize
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/authorize') {
       const deviceId =
         (req.body?.deviceId as string) ||
-        url.searchParams.get('deviceId') ||
-        'nova_c3_84f3eba1';
+        url.searchParams.get('deviceId');
+
+      if (!deviceId) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'DEVICE_ID_REQUIRED',
+            message: 'A valid deviceId is required to start Notion authorization.',
+          },
+        });
+        return;
+      }
+
       const redirectUri =
         (req.body?.redirectUri as string) ||
         url.searchParams.get('redirect_uri') ||
@@ -478,7 +793,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 6. POST / GET /api/v1/auth/notion/callback
+    // 8. POST / GET /api/v1/auth/notion/callback
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/callback') {
       const code = (req.body?.code as string) || url.searchParams.get('code');
@@ -501,7 +816,15 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       }
 
       const stateParts = state.split('_');
-      const deviceId = (req.body?.deviceId as string) || (stateParts.length >= 2 ? stateParts[1] : 'nova_c3_84f3eba1');
+      const deviceId = (req.body?.deviceId as string) || (stateParts.length >= 2 ? stateParts[1] : null);
+
+      if (!deviceId) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'INVALID_STATE', message: 'Missing target deviceId in OAuth state.' },
+        });
+        return;
+      }
 
       const clientId = process.env.NOTION_CLIENT_ID;
       const clientSecret = process.env.NOTION_CLIENT_SECRET;
@@ -603,12 +926,23 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 7. POST /api/v1/devices/:deviceId/notion/disconnect
+    // 9. POST /api/v1/devices/:deviceId/notion/disconnect
+    // Enforces Bearer authentication.
     // =========================================================================
     const notionDiscMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/notion\/disconnect$/);
     if (notionDiscMatch && method === 'POST') {
-      const deviceId = decodeURIComponent(notionDiscMatch[1]);
-      await queryDb('DELETE FROM notion_authorizations WHERE device_id = $1', [deviceId]);
+      const targetDeviceId = decodeURIComponent(notionDiscMatch[1]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, {
+          success: false,
+          error: { code: auth.code, message: auth.message },
+        });
+        return;
+      }
+
+      await queryDb('DELETE FROM notion_authorizations WHERE device_id = $1', [targetDeviceId]);
 
       sendJson(res, 200, {
         success: true,
@@ -621,13 +955,24 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 8. POST /api/v1/devices/:deviceId/sync/test
+    // 10. POST /api/v1/devices/:deviceId/sync/test
     // Idempotent sync test to Notion database
+    // Enforces Bearer authentication.
     // =========================================================================
     const syncTestMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/sync\/test$/);
     if (syncTestMatch && method === 'POST') {
-      const deviceId = decodeURIComponent(syncTestMatch[1]);
-      const notionAuths = await queryDb<NotionAuthRecord>('SELECT * FROM notion_authorizations WHERE device_id = $1', [deviceId]);
+      const targetDeviceId = decodeURIComponent(syncTestMatch[1]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, {
+          success: false,
+          error: { code: auth.code, message: auth.message },
+        });
+        return;
+      }
+
+      const notionAuths = await queryDb<NotionAuthRecord>('SELECT * FROM notion_authorizations WHERE device_id = $1', [targetDeviceId]);
 
       if (notionAuths.length === 0) {
         sendJson(res, 400, {
@@ -644,7 +989,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const idempotencyKey =
         (req.headers['x-idempotency-key'] as string) ||
         (req.body?.idempotencyKey as string) ||
-        `test_sync_${deviceId}_${crypto.randomBytes(8).toString('hex')}`;
+        `test_sync_${targetDeviceId}_${crypto.randomBytes(8).toString('hex')}`;
 
       // Check for existing idempotent execution
       const existingActions = await queryDb<{ id: string; response_json: any }>(
@@ -665,7 +1010,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         `INSERT INTO device_actions (id, device_id, action_type, idempotency_key, payload_json, status)
          VALUES ($1, $2, 'sync_note', $3, $4, 'pending')
          ON CONFLICT (idempotency_key) DO NOTHING;`,
-        [actionId, deviceId, idempotencyKey, JSON.stringify({ test: true })]
+        [actionId, targetDeviceId, idempotencyKey, JSON.stringify({ test: true })]
       );
 
       // Decrypt token
@@ -768,7 +1113,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         syncedTimestamp: new Date().toISOString(),
       };
 
-      await queryDb('UPDATE notion_authorizations SET last_sync_at = NOW() WHERE device_id = $1', [deviceId]);
+      await queryDb('UPDATE notion_authorizations SET last_sync_at = NOW() WHERE device_id = $1', [targetDeviceId]);
       await queryDb(
         "UPDATE device_actions SET status = 'acknowledged', response_json = $1, acknowledged_at = NOW() WHERE id = $2",
         [JSON.stringify(responsePayload), actionId]

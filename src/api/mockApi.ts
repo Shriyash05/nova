@@ -35,11 +35,11 @@ class MockBackendStore {
   private config: MockConfig = { ...defaultMockConfig };
   
   private telemetry: DeviceTelemetry = {
-    deviceId: 'nova_c3_84f3eba1',
-    serialNumber: 'NOVA-C3-84F3EBA1',
-    shortClaimCode: 'NOV-84F3',
+    deviceId: 'nova-c3-5c20dc4239fca9ec',
+    serialNumber: 'NOVA-C3-5C20DC4239FCA9EC',
+    shortClaimCode: 'NOV-A9EC',
     hardwareModel: 'ESP32-C3 Super Mini (RISC-V 160MHz)',
-    firmwareVersion: 'v1.0.0-stable',
+    firmwareVersion: 'v1.0.0-c3',
     batteryPercent: 94,
     isCharging: false,
     status: 'online',
@@ -58,7 +58,7 @@ class MockBackendStore {
     connectedSsid: 'Home_Studio_2.4G',
     rssi: -54,
     ipAddress: '192.168.1.188',
-    macAddress: '84:F3:EB:A1:0C:4A',
+    macAddress: '48:F6:EE:17:34:D8',
     gatewayIp: '192.168.1.1',
     frequencyBand: '2.4GHz',
   };
@@ -141,7 +141,7 @@ class MockBackendStore {
       connectedSsid: null,
       rssi: null,
       ipAddress: null,
-      macAddress: '84:F3:EB:A1:0C:4A',
+      macAddress: '48:F6:EE:17:34:D8',
       gatewayIp: null,
       frequencyBand: '2.4GHz',
     };
@@ -207,8 +207,8 @@ export const mockApi = {
       success: true,
       data: {
         pairingSessionId: `sess_${Math.random().toString(36).substring(2, 12)}`,
-        deviceId: 'nova_c3_84f3eba1',
-        serialNumber: 'NOVA-C3-84F3EBA1',
+        deviceId: payload.claimToken?.includes('c3') ? 'nova-c3-5c20dc4239fca9ec' : 'nova-c3-5c20dc4239fca9ec',
+        serialNumber: 'NOVA-C3-5C20DC4239FCA9EC',
         hardwareModel: 'ESP32-C3 Super Mini',
         expiresInSeconds: 900,
       },

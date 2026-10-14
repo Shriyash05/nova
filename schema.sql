@@ -6,15 +6,19 @@
 
 -- 1. Devices: Durable identity surviving Wi-Fi reconnects & recovery
 CREATE TABLE IF NOT EXISTS devices (
-    id VARCHAR(64) PRIMARY KEY,                             -- e.g. 'nova_c3_84f3eba1'
-    serial_number VARCHAR(64) NOT NULL UNIQUE,              -- e.g. 'NOVA-C3-84F3EBA1'
-    mac_address VARCHAR(32) NOT NULL,                       -- e.g. '84:F3:EB:A1:0C:4A'
+    id VARCHAR(64) PRIMARY KEY,                             -- e.g. 'nova-c3-5c20dc4239fca9ec'
+    serial_number VARCHAR(64) NOT NULL UNIQUE,              -- e.g. 'NOVA-C3-5C20DC4239FCA9EC'
+    mac_address VARCHAR(32) NOT NULL,                       -- e.g. '48:F6:EE:17:34:D8'
     hardware_model VARCHAR(64) NOT NULL DEFAULT 'ESP32-C3 Super Mini',
-    firmware_version VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
+    firmware_version VARCHAR(32) NOT NULL DEFAULT 'v1.0.0-c3',
     status VARCHAR(16) NOT NULL DEFAULT 'offline',          -- 'online' | 'offline'
+    device_secret VARCHAR(128),                             -- Persistent device key for heartbeat auth
     ip_address VARCHAR(45),
+    wifi_connected BOOLEAN NOT NULL DEFAULT FALSE,
     wifi_ssid VARCHAR(64),
     wifi_rssi INTEGER,
+    oled_state VARCHAR(32) NOT NULL DEFAULT 'idle',         -- 'idle' | 'listening' | 'pairing_qr' | 'wifi_setup' | 'synced' | 'offline'
+    queue_count INTEGER NOT NULL DEFAULT 0,
     last_heartbeat TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -43,6 +47,8 @@ CREATE TABLE IF NOT EXISTS pairing_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_pairing_sessions_device ON pairing_sessions(device_id);
+
 -- 4. Notion Authorizations: Server-side OAuth metadata; tokens encrypted at rest with AES-256-GCM
 CREATE TABLE IF NOT EXISTS notion_authorizations (
     device_id VARCHAR(64) PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
@@ -60,11 +66,10 @@ CREATE TABLE IF NOT EXISTS notion_authorizations (
 );
 
 -- 5. Device Actions & Idempotent Sync Queue
--- Ensures power loss, network retries, and offline queuing never cause duplicate Notion notes
 CREATE TABLE IF NOT EXISTS device_actions (
     id VARCHAR(64) PRIMARY KEY,                             -- Action ID
     device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    action_type VARCHAR(64) NOT NULL,                       -- 'sync_note' | 'wifi_provision' | 'heartbeat'
+    action_type VARCHAR(64) NOT NULL,                       -- 'sync_note' | 'heartbeat'
     idempotency_key VARCHAR(128) NOT NULL UNIQUE,           -- Unique key preventing duplicate insertion
     payload_json JSONB NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'pending',          -- 'pending' | 'delivered' | 'acknowledged' | 'failed'

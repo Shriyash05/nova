@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 
 export interface WifiProvisionScreenProps {
+  deviceId?: string;
+  pairingSessionId?: string;
   onProvision: (credentials: { ssid: string; password?: string }) => Promise<boolean>;
   onScanNetworks: () => Promise<any[]>;
   isRecovery?: boolean;
@@ -19,6 +21,8 @@ export interface WifiProvisionScreenProps {
 }
 
 export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
+  deviceId,
+  pairingSessionId,
   onProvision,
   isRecovery = false,
   onCancelRecovery,
@@ -27,12 +31,15 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  const targetDeviceId = deviceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_device_id') : null) || 'nova-c3-5c20dc4239fca9ec';
+  const shortSuffix = targetDeviceId.replace(/^nova-c3-/, '').slice(-4).toUpperCase();
+
   // Automatic periodic check to detect when ESP32-C3 comes online
   useEffect(() => {
     let active = true;
     const interval = setInterval(async () => {
       try {
-        const res = await apiClient.getDeviceStatus('nova_c3_84f3eba1');
+        const res = await apiClient.getDeviceStatus(targetDeviceId, pairingSessionId);
         if (active && res.success && res.data?.wifi?.state === 'connected') {
           setStatusMessage('ESP32-C3 verified online! Redirecting...');
           onProvision({ ssid: res.data.wifi.connectedSsid || 'Home_2.4G' });
@@ -46,13 +53,13 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
       active = false;
       clearInterval(interval);
     };
-  }, [onProvision]);
+  }, [targetDeviceId, pairingSessionId, onProvision]);
 
   const handleManualCheck = async () => {
     setIsCheckingStatus(true);
     setStatusMessage(null);
     try {
-      const res = await apiClient.getDeviceStatus('nova_c3_84f3eba1');
+      const res = await apiClient.getDeviceStatus(targetDeviceId, pairingSessionId);
       if (res.success && res.data?.wifi?.state === 'connected') {
         setStatusMessage('NOVA is online and registered with cloud backend!');
         await onProvision({ ssid: res.data.wifi.connectedSsid || 'Home_2.4G' });
@@ -70,9 +77,9 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
     setIsSimulating(true);
     try {
       await apiClient.bootstrapDevice({
-        deviceId: 'nova_c3_84f3eba1',
-        serialNumber: 'NOVA-C3-84F3EBA1',
-        macAddress: '84:F3:EB:A1:0C:4A',
+        deviceId: targetDeviceId,
+        serialNumber: `NOVA-C3-${targetDeviceId.replace(/^nova-c3-/, '').toUpperCase()}`,
+        macAddress: '48:F6:EE:17:34:D8',
         wifiSsid: 'Home_Studio_2.4G',
         ipAddress: '192.168.1.188',
         rssi: -54,
@@ -133,7 +140,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
       <NovaDeviceMockup
         size="sm"
         oledState={isRecovery ? 'offline' : 'wifi_setup'}
-        caption={isRecovery ? 'OLED: SoftAP Active • Setup: NOVA-C3-84F3' : 'OLED: SoftAP Active • Setup: NOVA-C3-84F3'}
+        caption={isRecovery ? `OLED: SoftAP Active • Setup: NOVA-C3-${shortSuffix}` : `OLED: SoftAP Active • Setup: NOVA-C3-${shortSuffix}`}
       />
 
       {/* Hardware SoftAP Step-by-Step Guide */}
@@ -185,7 +192,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
                     border: '1px solid rgba(0, 240, 255, 0.25)',
                   }}
                 >
-                  SSID: NOVA-Setup-84F3
+                  SSID: NOVA-Setup-{shortSuffix}
                 </div>
               </div>
             </div>

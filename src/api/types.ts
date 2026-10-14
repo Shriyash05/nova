@@ -13,6 +13,30 @@ export interface ApiResponse<T> {
   };
 }
 
+export interface BootstrapDevicePayload {
+  deviceId: string;
+  macAddress: string;
+  firmwareVersion?: string;
+  bootstrapSecret?: string;
+  serialNumber?: string;
+  wifiSsid?: string;
+  ipAddress?: string;
+  rssi?: number;
+}
+
+export interface BootstrapDeviceResult {
+  deviceId: string;
+  serialNumber: string;
+  macAddress: string;
+  firmwareVersion: string;
+  claimToken: string;
+  shortCode: string;
+  expiresAt: string;
+  expiresInSeconds: number;
+  deviceKey: string;
+  portalUrl: string;
+}
+
 export interface ClaimDevicePayload {
   claimToken?: string;
   shortCode?: string;
@@ -24,6 +48,24 @@ export interface ClaimDeviceResult {
   serialNumber: string;
   hardwareModel: string;
   expiresInSeconds: number;
+}
+
+export interface DeviceHeartbeatPayload {
+  firmwareVersion?: string;
+  wifiConnected?: boolean;
+  rssi?: number | null;
+  ipAddress?: string | null;
+  queueCount?: number;
+  oledState?: string;
+}
+
+export interface DeviceHeartbeatResult {
+  acknowledged: boolean;
+  deviceId: string;
+  serverTime: string;
+  status: string;
+  oledState: string;
+  queueCount: number;
 }
 
 export interface DeviceFullStatusResponse {
