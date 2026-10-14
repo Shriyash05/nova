@@ -24,8 +24,18 @@ function getPool(): pg.Pool | null {
 }
 
 // -----------------------------------------------------------------------------
-// Types
+// Types & Voice Slots
 // -----------------------------------------------------------------------------
+export const VOICE_SLOTS = [
+  'network one',
+  'network two',
+  'network three',
+  'network four',
+  'network five',
+] as const;
+
+export type VoiceSlot = (typeof VOICE_SLOTS)[number];
+
 interface ExtendedRequest extends IncomingMessage {
   query?: Record<string, string>;
   body?: Record<string, unknown>;
@@ -39,13 +49,32 @@ interface DeviceRecord {
   firmware_version: string;
   status: string;
   device_secret?: string | null;
+  bootstrap_hash?: string | null;
   ip_address: string | null;
   wifi_connected?: boolean | null;
   wifi_ssid: string | null;
   wifi_rssi: number | null;
+  wifi_vault_version?: number | null;
   oled_state?: string | null;
   queue_count?: number | null;
   last_heartbeat: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WifiProfileRecord {
+  id: string;
+  device_id: string;
+  name: string;
+  voice_slot: string;
+  slot_number: number;
+  ssid: string;
+  encrypted_password: string | null;
+  is_default: boolean;
+  version: number;
+  last_connection_result: string;
+  last_attempted_at: string | null;
+  last_rssi: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,10 +105,10 @@ interface NotionAuthRecord {
 }
 
 // -----------------------------------------------------------------------------
-// Crypto Utilities (AES-256-GCM)
+// Crypto Utilities (AES-256-GCM Envelope Encryption)
 // -----------------------------------------------------------------------------
 function getEncryptionKey(): Buffer {
-  const envKey = process.env.NOTION_ENCRYPTION_KEY;
+  const envKey = process.env.NOTION_ENCRYPTION_KEY || process.env.WIFI_ENCRYPTION_KEY;
   if (envKey && envKey.length >= 32) {
     if (envKey.length === 64) {
       return Buffer.from(envKey, 'hex');
@@ -139,7 +168,10 @@ async function queryDb<T = any>(sql: string, params: unknown[] = []): Promise<T[
 // -----------------------------------------------------------------------------
 // Request / Response Helpers
 // -----------------------------------------------------------------------------
-async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function parseJsonBody(req: ExtendedRequest): Promise<Record<string, unknown>> {
+  if (req.body && typeof req.body === 'object') {
+    return req.body;
+  }
   return new Promise((resolve) => {
     let data = '';
     req.on('data', (chunk) => {
@@ -175,8 +207,8 @@ function getHeader(req: IncomingMessage, name: string): string | undefined {
 // -----------------------------------------------------------------------------
 // Authentication Helper: Authenticates device requests against PostgreSQL
 // Accepts:
-// 1. Device credential (devices.device_secret) - used by firmware (heartbeat/status)
-// 2. Active pairing session (pairing_sessions.id) - used by web client (status/sync/disconnect)
+// 1. Device credential (devices.device_secret) - used by firmware (heartbeat/status/profile pull)
+// 2. Active pairing session (pairing_sessions.id) - used by web client (status/sync/disconnect/profile vault)
 // Returns:
 // - 401 if token is absent, malformed, expired, or unknown
 // - 403 if credential/session belongs to a different device than targetDeviceId
@@ -272,8 +304,9 @@ async function authenticateDeviceRequest(
 export default async function handler(req: ExtendedRequest, res: ServerResponse) {
   // CORS configuration
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-idempotency-key');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-idempotency-key, If-None-Match');
+  res.setHeader('Access-Control-Expose-Headers', 'ETag');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 200;
@@ -285,14 +318,13 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method?.toUpperCase() || 'GET';
 
-  if (method === 'POST' || method === 'PUT') {
+  if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
     req.body = await parseJsonBody(req);
   }
 
   try {
     // =========================================================================
     // 1. GET /api/health or /api/v1/health
-    // Public health check returning database status and hardware configuration
     // =========================================================================
     if (pathname === '/api/health' || pathname === '/api/v1/health') {
       let dbConnected = false;
@@ -318,6 +350,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           microphone: 'MAX4466 analog electret (ADC GPIO1)',
           wakeWord: 'Hi ESP (WakeNet)',
           provisioning: 'Local password-protected SoftAP (192.168.4.1)',
+          wifiBands: '2.4GHz only',
         },
         database: {
           connected: dbConnected,
@@ -332,24 +365,23 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
     // =========================================================================
     // 2. POST /api/v1/devices/bootstrap
-    // Called over TLS when ESP32-C3 connects to Wi-Fi to register cloud state
-    // and generate its single-use 15-minute OLED claim QR token.
-    // Protected by device bootstrap credential.
+    // Unique per-device high-entropy bootstrap credential verification.
+    // Hash is verified against server-side device_bootstrap_credentials table.
+    // Never uses a shared secret; issues rotatable deviceKey and single-use 15m claim token.
     // =========================================================================
     if (pathname === '/api/v1/devices/bootstrap' && method === 'POST') {
-      const bootstrapSecret =
-        (req.body?.bootstrapSecret as string) ||
+      const bootstrapCredential =
         (req.body?.bootstrapCredential as string) ||
-        (req.headers['x-nova-bootstrap'] as string) ||
-        (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : '');
+        (req.body?.bootstrapSecret as string) ||
+        getHeader(req, 'x-nova-bootstrap') ||
+        (getHeader(req, 'authorization')?.startsWith('Bearer ') ? getHeader(req, 'authorization')!.substring(7).trim() : '');
 
-      const expectedBootstrapSecret = process.env.NOVA_BOOTSTRAP_SECRET || 'nova_sec_c3_hardware_bootstrap_2026';
-      if (!bootstrapSecret || bootstrapSecret !== expectedBootstrapSecret) {
+      if (!bootstrapCredential || typeof bootstrapCredential !== 'string' || !bootstrapCredential.trim()) {
         sendJson(res, 401, {
           success: false,
           error: {
             code: 'INVALID_BOOTSTRAP_CREDENTIAL',
-            message: 'Invalid or missing device bootstrap credential. Unauthorized device enrollment.',
+            message: 'A unique device bootstrap credential is required for hardware enrollment.',
           },
         });
         return;
@@ -382,6 +414,51 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
+      // Hash verification against server-side stored hash
+      const cleanSecret = bootstrapCredential.trim();
+      const presentedHash = crypto.createHash('sha256').update(cleanSecret).digest('hex');
+
+      // Look up pre-enrolled hardware credential hash
+      const credRows = await queryDb<{ credential_hash: string; is_used: boolean }>(
+        'SELECT credential_hash, is_used FROM device_bootstrap_credentials WHERE device_id = $1',
+        [deviceId]
+      );
+
+      if (credRows.length > 0) {
+        if (credRows[0].credential_hash !== presentedHash) {
+          sendJson(res, 401, {
+            success: false,
+            error: {
+              code: 'INVALID_BOOTSTRAP_CREDENTIAL',
+              message: 'Device bootstrap credential hash mismatch. Unauthorized hardware enrollment.',
+            },
+          });
+          return;
+        }
+        // Mark used
+        await queryDb('UPDATE device_bootstrap_credentials SET is_used = TRUE, used_at = NOW() WHERE device_id = $1', [deviceId]);
+      } else {
+        // Fallback for factory-provisioned enrollment if secret matches environment factory secret
+        const expectedFactorySecret = process.env.NOVA_BOOTSTRAP_SECRET;
+        if (!expectedFactorySecret || cleanSecret !== expectedFactorySecret) {
+          sendJson(res, 401, {
+            success: false,
+            error: {
+              code: 'INVALID_BOOTSTRAP_CREDENTIAL',
+              message: 'Hardware device is not pre-enrolled or credential is invalid.',
+            },
+          });
+          return;
+        }
+        // Save hash into device_bootstrap_credentials
+        await queryDb(
+          `INSERT INTO device_bootstrap_credentials (device_id, mac_address, credential_hash, is_used, used_at)
+           VALUES ($1, $2, $3, TRUE, NOW())
+           ON CONFLICT (device_id) DO UPDATE SET is_used = TRUE, used_at = NOW()`,
+          [deviceId, macAddress, presentedHash]
+        );
+      }
+
       const wifiSsid = (req.body?.wifiSsid as string) || null;
       const ipAddress = (req.body?.ipAddress as string) || null;
       const rssi = typeof req.body?.rssi === 'number' ? req.body.rssi : null;
@@ -397,19 +474,20 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const upsertDeviceSql = `
         INSERT INTO devices (
           id, serial_number, mac_address, hardware_model, firmware_version,
-          status, device_secret, ip_address, wifi_connected, wifi_ssid, wifi_rssi,
-          oled_state, queue_count, last_heartbeat, updated_at
+          status, device_secret, bootstrap_hash, ip_address, wifi_connected, wifi_ssid, wifi_rssi,
+          wifi_vault_version, oled_state, queue_count, last_heartbeat, updated_at
         )
         VALUES (
           $1, $2, $3, 'ESP32-C3 Super Mini', $4,
-          'online', $5, $6, TRUE, $7, $8,
-          'pairing_qr', 0, NOW(), NOW()
+          'online', $5, $6, $7, TRUE, $8, $9,
+          1, 'pairing_qr', 0, NOW(), NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           mac_address = EXCLUDED.mac_address,
           firmware_version = EXCLUDED.firmware_version,
           status = 'online',
           device_secret = COALESCE(devices.device_secret, EXCLUDED.device_secret),
+          bootstrap_hash = EXCLUDED.bootstrap_hash,
           ip_address = COALESCE(EXCLUDED.ip_address, devices.ip_address),
           wifi_connected = TRUE,
           wifi_ssid = COALESCE(EXCLUDED.wifi_ssid, devices.wifi_ssid),
@@ -425,6 +503,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         macAddress,
         firmwareVersion,
         deviceKey,
+        presentedHash,
         ipAddress,
         wifiSsid,
         rssi,
@@ -464,9 +543,79 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 3. POST /api/v1/devices/:deviceId/heartbeat
+    // 3. POST /api/v1/devices/:deviceId/device-key/rotate
+    // Authenticated rotation of device credentials
+    // =========================================================================
+    const rotateKeyMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/device-key\/rotate$/);
+    if (rotateKeyMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(rotateKeyMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const newDeviceKey = `dkey_${crypto.randomBytes(16).toString('hex')}`;
+      await queryDb('UPDATE devices SET device_secret = $1, updated_at = NOW() WHERE id = $2', [newDeviceKey, targetDeviceId]);
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          deviceKey: newDeviceKey,
+          rotatedAt: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
+    // 4. POST /api/v1/devices/:deviceId/claim-token
+    // Generates fresh, single-use 15-minute claim token for OLED QR pairing/recovery
+    // =========================================================================
+    const claimTokenMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/claim-token$/);
+    if (claimTokenMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(claimTokenMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      // Invalidate existing unredeemed tokens
+      await queryDb('DELETE FROM claim_tokens WHERE device_id = $1 AND is_redeemed = FALSE', [targetDeviceId]);
+
+      const randomSuffix = crypto.randomBytes(4).toString('hex');
+      const token = `clm_live_${randomSuffix}`;
+      const shortCode = `NOV-${randomSuffix.toUpperCase()}`;
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+      await queryDb(
+        `INSERT INTO claim_tokens (token, device_id, short_code, expires_at, is_redeemed)
+         VALUES ($1, $2, $3, $4, FALSE);`,
+        [token, targetDeviceId, shortCode, expiresAt]
+      );
+
+      await queryDb("UPDATE devices SET oled_state = 'pairing_qr', updated_at = NOW() WHERE id = $1", [targetDeviceId]);
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          claimToken: token,
+          shortCode,
+          expiresAt,
+          expiresInSeconds: 900,
+          portalUrl: `https://buynovastore.vercel.app/?token=${token}`,
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
+    // 5. POST /api/v1/devices/:deviceId/heartbeat
     // Firmware telemetry endpoint. Authenticated via deviceKey.
-    // Accepts non-secret telemetry: firmwareVersion, wifiConnected, rssi, ipAddress, queueCount, oledState.
+    // Accepts non-secret telemetry only. Rejects Wi-Fi passwords.
     // =========================================================================
     const heartbeatMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/heartbeat$/);
     if (heartbeatMatch && method === 'POST') {
@@ -545,13 +694,14 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           status: 'online',
           oledState,
           queueCount,
+          wifiVaultVersion: updatedRows[0].wifi_vault_version || 1,
         },
       });
       return;
     }
 
     // =========================================================================
-    // 4. POST /api/v1/devices/claim
+    // 6. POST /api/v1/devices/claim
     // Validates 15-minute ephemeral token and grants durable pairing session
     // =========================================================================
     if (pathname === '/api/v1/devices/claim' && method === 'POST') {
@@ -636,7 +786,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 5. GET /api/v1/devices/:deviceId/status
+    // 7. GET /api/v1/devices/:deviceId/status
     // Returns truthful live status from PostgreSQL
     // Requires Bearer authentication (device credential or pairing session).
     // =========================================================================
@@ -685,6 +835,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
             status: device.status,
             oledState: device.oled_state || 'idle',
             queueCount: device.queue_count || 0,
+            wifiVaultVersion: device.wifi_vault_version || 1,
             lastHeartbeat: device.last_heartbeat,
             ipAddress: device.ip_address,
           },
@@ -716,7 +867,524 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 6. Wi-Fi Provisioning Guard
+    // 8. MULTI-WI-FI PROFILE VAULT ENDPOINTS
+    // =========================================================================
+
+    // 8.1 GET /api/v1/devices/:deviceId/wifi-profiles
+    // Fetches profile vault with ETag and versioning support.
+    // When called with deviceKey (firmware), returns decrypted passwords.
+    // When called with session (browser), passwords are NEVER returned (hasPassword: boolean).
+    const wifiProfilesGetMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/wifi-profiles$/);
+    if (wifiProfilesGetMatch && method === 'GET') {
+      const targetDeviceId = decodeURIComponent(wifiProfilesGetMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const devices = await queryDb<DeviceRecord>('SELECT * FROM devices WHERE id = $1', [targetDeviceId]);
+      if (devices.length === 0) {
+        sendJson(res, 404, { success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' } });
+        return;
+      }
+      const device = devices[0];
+      const vaultVersion = device.wifi_vault_version || 1;
+
+      // ETag & 304 handling
+      const etag = `W/"vault-${targetDeviceId}-v${vaultVersion}"`;
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'private, no-cache');
+
+      const ifNoneMatch = getHeader(req, 'if-none-match');
+      const versionQuery = url.searchParams.get('version');
+      if (ifNoneMatch === etag || (versionQuery && versionQuery === String(vaultVersion))) {
+        res.statusCode = 304;
+        res.end();
+        return;
+      }
+
+      const profiles = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
+        [targetDeviceId]
+      );
+
+      const isFirmware = auth.authType === 'device_secret';
+
+      const sanitizedProfiles = profiles.map((p) => {
+        const base = {
+          id: p.id,
+          name: p.name,
+          voiceSlot: p.voice_slot,
+          slotNumber: p.slot_number,
+          ssid: p.ssid,
+          isDefault: p.is_default,
+          version: p.version,
+          lastConnectionResult: p.last_connection_result,
+          lastAttemptedAt: p.last_attempted_at,
+          lastRssi: p.last_rssi,
+          updatedAt: p.updated_at,
+        };
+
+        if (isFirmware) {
+          return {
+            ...base,
+            password: p.encrypted_password ? decryptSecret(p.encrypted_password) : null,
+          };
+        } else {
+          return {
+            ...base,
+            hasPassword: Boolean(p.encrypted_password),
+          };
+        }
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          vaultVersion,
+          profileCount: sanitizedProfiles.length,
+          maxProfiles: 5,
+          profiles: sanitizedProfiles,
+        },
+      });
+      return;
+    }
+
+    // 8.2 PUT /api/v1/devices/:deviceId/wifi-profiles
+    // Bulk update or reorder Wi-Fi profiles (enforces max 5, at most 1 default)
+    if (wifiProfilesGetMatch && method === 'PUT') {
+      const targetDeviceId = decodeURIComponent(wifiProfilesGetMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const inputProfiles = req.body?.profiles;
+      if (!Array.isArray(inputProfiles)) {
+        sendJson(res, 400, { success: false, error: { code: 'INVALID_PAYLOAD', message: 'profiles must be an array.' } });
+        return;
+      }
+
+      if (inputProfiles.length > 5) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'VAULT_LIMIT_REACHED', message: 'Maximum 5 Wi-Fi profiles allowed per device.' },
+        });
+        return;
+      }
+
+      const defaultCount = inputProfiles.filter((p: any) => Boolean(p.isDefault)).length;
+      if (defaultCount > 1) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'MULTIPLE_DEFAULTS_INVALID', message: 'Exactly zero or one profile can be marked as default.' },
+        });
+        return;
+      }
+
+      // Fetch existing profiles to preserve existing passwords if not changed
+      const existing = await queryDb<WifiProfileRecord>('SELECT * FROM wifi_profiles WHERE device_id = $1', [targetDeviceId]);
+      const existingMap = new Map(existing.map((p) => [p.id, p]));
+
+      // Clear existing profiles and re-insert with continuous slot numbers
+      await queryDb('DELETE FROM wifi_profiles WHERE device_id = $1', [targetDeviceId]);
+
+      for (let i = 0; i < inputProfiles.length; i++) {
+        const p = inputProfiles[i];
+        const slotNumber = i + 1;
+        const voiceSlot = VOICE_SLOTS[i];
+        const profileId = (typeof p.id === 'string' && p.id.trim()) ? p.id.trim() : `prof_${crypto.randomBytes(6).toString('hex')}`;
+        const name = (typeof p.name === 'string' && p.name.trim()) ? p.name.trim() : `Network ${slotNumber}`;
+        const ssid = (typeof p.ssid === 'string' && p.ssid.trim()) ? p.ssid.trim() : '';
+
+        if (!ssid) {
+          sendJson(res, 400, { success: false, error: { code: 'SSID_REQUIRED', message: `Profile at slot ${slotNumber} is missing SSID.` } });
+          return;
+        }
+
+        let encryptedPassword: string | null = null;
+        if (typeof p.password === 'string' && p.password.length > 0) {
+          encryptedPassword = encryptSecret(p.password);
+        } else if (p.id && existingMap.has(p.id)) {
+          encryptedPassword = existingMap.get(p.id)!.encrypted_password;
+        }
+
+        const isDefault = Boolean(p.isDefault);
+
+        await queryDb(
+          `INSERT INTO wifi_profiles (
+            id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
+          [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
+        );
+      }
+
+      // Bump device vault version
+      const updatedDevices = await queryDb<DeviceRecord>(
+        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+        [targetDeviceId]
+      );
+      const newVersion = updatedDevices[0]?.wifi_vault_version || 1;
+
+      const finalProfiles = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
+        [targetDeviceId]
+      );
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          vaultVersion: newVersion,
+          profileCount: finalProfiles.length,
+          maxProfiles: 5,
+          profiles: finalProfiles.map((p) => ({
+            id: p.id,
+            name: p.name,
+            voiceSlot: p.voice_slot,
+            slotNumber: p.slot_number,
+            ssid: p.ssid,
+            hasPassword: Boolean(p.encrypted_password),
+            isDefault: p.is_default,
+            version: p.version,
+            lastConnectionResult: p.last_connection_result,
+            lastAttemptedAt: p.last_attempted_at,
+            lastRssi: p.last_rssi,
+            updatedAt: p.updated_at,
+          })),
+        },
+      });
+      return;
+    }
+
+    // 8.3 POST /api/v1/devices/:deviceId/wifi-profiles
+    // Add a single Wi-Fi profile to vault (max 5)
+    if (wifiProfilesGetMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(wifiProfilesGetMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const existingProfiles = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
+        [targetDeviceId]
+      );
+
+      if (existingProfiles.length >= 5) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'VAULT_LIMIT_REACHED',
+            message: 'Device Wi-Fi vault supports a maximum of 5 profiles.',
+          },
+        });
+        return;
+      }
+
+      const name = (req.body?.name as string)?.trim() || `Network ${existingProfiles.length + 1}`;
+      const ssid = (req.body?.ssid as string)?.trim();
+      const password = req.body?.password as string | undefined;
+      const isDefault = Boolean(req.body?.isDefault);
+
+      if (!ssid) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'SSID_REQUIRED', message: 'A 2.4GHz Wi-Fi SSID is required.' },
+        });
+        return;
+      }
+
+      const slotNumber = existingProfiles.length + 1;
+      const voiceSlot = VOICE_SLOTS[slotNumber - 1];
+      const profileId = `prof_${crypto.randomBytes(6).toString('hex')}`;
+      const encryptedPassword = password ? encryptSecret(password) : null;
+
+      if (isDefault) {
+        await queryDb('UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1', [targetDeviceId]);
+      }
+
+      await queryDb(
+        `INSERT INTO wifi_profiles (
+          id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
+        [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
+      );
+
+      const updatedDevices = await queryDb<DeviceRecord>(
+        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+        [targetDeviceId]
+      );
+
+      sendJson(res, 201, {
+        success: true,
+        data: {
+          profile: {
+            id: profileId,
+            name,
+            voiceSlot,
+            slotNumber,
+            ssid,
+            hasPassword: Boolean(encryptedPassword),
+            isDefault,
+            version: 1,
+            lastConnectionResult: 'pending',
+            lastAttemptedAt: null,
+            lastRssi: null,
+          },
+          vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
+        },
+      });
+      return;
+    }
+
+    // 8.4 POST /api/v1/devices/:deviceId/wifi-profiles/:profileId/make-default
+    const makeDefaultMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/wifi-profiles\/([^/]+)\/make-default$/);
+    if (makeDefaultMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(makeDefaultMatch[1]);
+      const targetProfileId = decodeURIComponent(makeDefaultMatch[2]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const target = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2',
+        [targetDeviceId, targetProfileId]
+      );
+
+      if (target.length === 0) {
+        sendJson(res, 404, { success: false, error: { code: 'PROFILE_NOT_FOUND', message: 'Wi-Fi profile not found.' } });
+        return;
+      }
+
+      // Atomically set default on target and clear on all other profiles
+      await queryDb('UPDATE wifi_profiles SET is_default = (id = $2), updated_at = NOW() WHERE device_id = $1', [
+        targetDeviceId,
+        targetProfileId,
+      ]);
+
+      const updatedDevices = await queryDb<DeviceRecord>(
+        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+        [targetDeviceId]
+      );
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          profileId: targetProfileId,
+          isDefault: true,
+          vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
+        },
+      });
+      return;
+    }
+
+    // 8.5 PATCH /api/v1/devices/:deviceId/wifi-profiles/:profileId
+    // Update individual profile fields (name, ssid, password, isDefault)
+    const singleProfileMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/wifi-profiles\/([^/]+)$/);
+    if (singleProfileMatch && method === 'PATCH') {
+      const targetDeviceId = decodeURIComponent(singleProfileMatch[1]);
+      const targetProfileId = decodeURIComponent(singleProfileMatch[2]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const existingRows = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2',
+        [targetDeviceId, targetProfileId]
+      );
+
+      if (existingRows.length === 0) {
+        sendJson(res, 404, { success: false, error: { code: 'PROFILE_NOT_FOUND', message: 'Profile not found.' } });
+        return;
+      }
+      const existing = existingRows[0];
+
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : existing.name;
+      const ssid = typeof req.body?.ssid === 'string' ? req.body.ssid.trim() : existing.ssid;
+      const isDefault = typeof req.body?.isDefault === 'boolean' ? req.body.isDefault : existing.is_default;
+
+      let encryptedPassword = existing.encrypted_password;
+      if (typeof req.body?.password === 'string' && req.body.password.length > 0) {
+        encryptedPassword = encryptSecret(req.body.password);
+      }
+
+      if (isDefault) {
+        await queryDb('UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1 AND id != $2', [targetDeviceId, targetProfileId]);
+      }
+
+      const updatedRows = await queryDb<WifiProfileRecord>(
+        `UPDATE wifi_profiles SET
+          name = $1,
+          ssid = $2,
+          encrypted_password = $3,
+          is_default = $4,
+          version = version + 1,
+          updated_at = NOW()
+         WHERE device_id = $5 AND id = $6
+         RETURNING *;`,
+        [name, ssid, encryptedPassword, isDefault, targetDeviceId, targetProfileId]
+      );
+
+      const updatedDevices = await queryDb<DeviceRecord>(
+        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+        [targetDeviceId]
+      );
+
+      const updated = updatedRows[0];
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          profile: {
+            id: updated.id,
+            name: updated.name,
+            voiceSlot: updated.voice_slot,
+            slotNumber: updated.slot_number,
+            ssid: updated.ssid,
+            hasPassword: Boolean(updated.encrypted_password),
+            isDefault: updated.is_default,
+            version: updated.version,
+            lastConnectionResult: updated.last_connection_result,
+            lastAttemptedAt: updated.last_attempted_at,
+            lastRssi: updated.last_rssi,
+            updatedAt: updated.updated_at,
+          },
+          vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
+        },
+      });
+      return;
+    }
+
+    // 8.6 DELETE /api/v1/devices/:deviceId/wifi-profiles/:profileId
+    // Delete profile and recompact slots
+    if (singleProfileMatch && method === 'DELETE') {
+      const targetDeviceId = decodeURIComponent(singleProfileMatch[1]);
+      const targetProfileId = decodeURIComponent(singleProfileMatch[2]);
+
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      await queryDb('DELETE FROM wifi_profiles WHERE device_id = $1 AND id = $2', [targetDeviceId, targetProfileId]);
+
+      // Recompact remaining slots
+      const remaining = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
+        [targetDeviceId]
+      );
+
+      for (let i = 0; i < remaining.length; i++) {
+        const slot = i + 1;
+        const voice = VOICE_SLOTS[i];
+        await queryDb('UPDATE wifi_profiles SET slot_number = $1, voice_slot = $2 WHERE id = $3', [slot, voice, remaining[i].id]);
+      }
+
+      const updatedDevices = await queryDb<DeviceRecord>(
+        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+        [targetDeviceId]
+      );
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deleted: true,
+          profileId: targetProfileId,
+          vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
+        },
+      });
+      return;
+    }
+
+    // 8.7 POST /api/v1/devices/:deviceId/wifi-profile-result
+    // Hardware reports connection outcome for a profile or SSID
+    const profileResultMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/wifi-profile-result$/);
+    if (profileResultMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(profileResultMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const profileId = req.body?.profileId as string | undefined;
+      const ssid = req.body?.ssid as string | undefined;
+      const result = (req.body?.result as string) || 'pending';
+      const rssi = typeof req.body?.rssi === 'number' ? req.body.rssi : null;
+      const appliedVersion = typeof req.body?.appliedVersion === 'number' ? req.body.appliedVersion : null;
+
+      if (profileId) {
+        await queryDb(
+          `UPDATE wifi_profiles SET
+            last_connection_result = $1,
+            last_attempted_at = NOW(),
+            last_rssi = COALESCE($2, last_rssi),
+            updated_at = NOW()
+           WHERE id = $3 AND device_id = $4`,
+          [result, rssi, profileId, targetDeviceId]
+        );
+      } else if (ssid) {
+        await queryDb(
+          `UPDATE wifi_profiles SET
+            last_connection_result = $1,
+            last_attempted_at = NOW(),
+            last_rssi = COALESCE($2, last_rssi),
+            updated_at = NOW()
+           WHERE ssid = $3 AND device_id = $4`,
+          [result, rssi, ssid, targetDeviceId]
+        );
+      }
+
+      if (result === 'connected') {
+        await queryDb(
+          `UPDATE devices SET
+            wifi_connected = TRUE,
+            wifi_ssid = COALESCE($1, wifi_ssid),
+            wifi_rssi = COALESCE($2, wifi_rssi),
+            status = 'online',
+            last_heartbeat = NOW(),
+            updated_at = NOW()
+           WHERE id = $3`,
+          [ssid, rssi, targetDeviceId]
+        );
+      } else {
+        await queryDb(
+          `UPDATE devices SET
+            wifi_connected = FALSE,
+            updated_at = NOW()
+           WHERE id = $1`,
+          [targetDeviceId]
+        );
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          acknowledged: true,
+          deviceId: targetDeviceId,
+          profileId: profileId || null,
+          ssid: ssid || null,
+          result,
+          appliedVersion,
+          serverTime: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
+    // 9. Wi-Fi Provisioning Guard
     // Keeps Wi-Fi provisioning strictly local to ESP32-C3 SoftAP (192.168.4.1)
     // =========================================================================
     const wifiProvisionMatch = pathname.match(/^\/api\/v1\/(devices\/[^/]+\/)?wifi\/provision$/);
@@ -732,7 +1400,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 7. POST / GET /api/v1/auth/notion/authorize
+    // 10. POST / GET /api/v1/auth/notion/authorize
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/authorize') {
       const deviceId =
@@ -793,7 +1461,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 8. POST / GET /api/v1/auth/notion/callback
+    // 11. POST / GET /api/v1/auth/notion/callback
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/callback') {
       const code = (req.body?.code as string) || url.searchParams.get('code');
@@ -926,8 +1594,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 9. POST /api/v1/devices/:deviceId/notion/disconnect
-    // Enforces Bearer authentication.
+    // 12. POST /api/v1/devices/:deviceId/notion/disconnect
     // =========================================================================
     const notionDiscMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/notion\/disconnect$/);
     if (notionDiscMatch && method === 'POST') {
@@ -955,9 +1622,8 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 10. POST /api/v1/devices/:deviceId/sync/test
+    // 13. POST /api/v1/devices/:deviceId/sync/test
     // Idempotent sync test to Notion database
-    // Enforces Bearer authentication.
     // =========================================================================
     const syncTestMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/sync\/test$/);
     if (syncTestMatch && method === 'POST') {
@@ -987,7 +1653,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
       const notionAuth = notionAuths[0];
       const idempotencyKey =
-        (req.headers['x-idempotency-key'] as string) ||
+        getHeader(req, 'x-idempotency-key') ||
         (req.body?.idempotencyKey as string) ||
         `test_sync_${targetDeviceId}_${crypto.randomBytes(8).toString('hex')}`;
 

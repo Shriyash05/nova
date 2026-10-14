@@ -162,6 +162,8 @@ export const App: React.FC = () => {
 
         {state.step === 'DASHBOARD' && (
           <DeviceDashboardScreen
+            deviceId={state.deviceId || undefined}
+            authToken={state.pairingSessionId || apiClient.getSessionToken() || undefined}
             telemetry={state.deviceTelemetry || mockBackendStore.getTelemetry()}
             wifi={state.wifiStatus || mockBackendStore.getWifi()}
             notion={state.notionInfo || mockBackendStore.getNotion()}

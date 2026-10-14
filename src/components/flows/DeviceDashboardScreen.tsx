@@ -22,8 +22,11 @@ import {
   SlidersHorizontal,
   Mic,
 } from 'lucide-react';
+import { WifiProfilesVault } from './WifiProfilesVault';
 
 export interface DeviceDashboardScreenProps {
+  deviceId?: string;
+  authToken?: string;
   telemetry: DeviceTelemetry;
   wifi: WifiStatus;
   notion: NotionConnectionInfo;
@@ -36,6 +39,8 @@ export interface DeviceDashboardScreenProps {
 }
 
 export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
+  deviceId,
+  authToken,
   telemetry,
   wifi,
   notion,
@@ -45,6 +50,10 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
   onDisconnectNotion,
   onReconnectNotion,
 }) => {
+  const resolvedDeviceId =
+    deviceId ||
+    (typeof window !== 'undefined' ? localStorage.getItem('nova_device_id') : null) ||
+    'nova-c3-5c20dc4239fca9ec';
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isTestingSync, setIsTestingSync] = useState(false);
   const [syncTestResult, setSyncTestResult] = useState<NotionSyncTestResult | null>(null);
@@ -235,6 +244,13 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
           </div>
         </Card>
       </div>
+
+      {/* Multi-Wi-Fi Profile Vault (Max 5 Profiles, Stable Voice Slots, Encrypted at Rest) */}
+      <WifiProfilesVault
+        deviceId={resolvedDeviceId}
+        authToken={authToken}
+        onProfileChanged={onRefreshStatus}
+      />
 
       {/* Notion Integration Card */}
       <Card glow={notion.isConnected}>

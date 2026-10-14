@@ -2,11 +2,19 @@ import type {
   ApiResponse,
   BootstrapDevicePayload,
   BootstrapDeviceResult,
+  RotateDeviceKeyResult,
+  CreateClaimTokenResult,
   ClaimDevicePayload,
   ClaimDeviceResult,
   DeviceFullStatusResponse,
   DeviceHeartbeatPayload,
   DeviceHeartbeatResult,
+  WifiProfile,
+  WifiProfileVaultResponse,
+  CreateWifiProfilePayload,
+  UpdateWifiProfilePayload,
+  BulkUpdateWifiProfilesPayload,
+  WifiProfileResultPayload,
   WifiScanResult,
   WifiProvisionPayload,
   WifiProvisionResult,
@@ -106,6 +114,13 @@ export class NovaApiClient {
         headers,
       });
 
+      if (response.status === 304) {
+        return {
+          success: true,
+          data: undefined,
+        };
+      }
+
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
@@ -140,11 +155,34 @@ export class NovaApiClient {
   ): Promise<ApiResponse<BootstrapDeviceResult>> {
     return this.request<BootstrapDeviceResult>('/api/v1/devices/bootstrap', {
       method: 'POST',
-      body: JSON.stringify({
-        bootstrapSecret: 'nova_sec_c3_hardware_bootstrap_2026',
-        ...payload,
-      }),
+      body: JSON.stringify(payload),
     });
+  }
+
+  public async rotateDeviceKey(
+    deviceId: string,
+    authToken?: string
+  ): Promise<ApiResponse<RotateDeviceKeyResult>> {
+    return this.request<RotateDeviceKeyResult>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/device-key/rotate`,
+      {
+        method: 'POST',
+      },
+      authToken
+    );
+  }
+
+  public async createClaimToken(
+    deviceId: string,
+    authToken?: string
+  ): Promise<ApiResponse<CreateClaimTokenResult>> {
+    return this.request<CreateClaimTokenResult>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/claim-token`,
+      {
+        method: 'POST',
+      },
+      authToken
+    );
   }
 
   public async claimDevice(payload: ClaimDevicePayload): Promise<ApiResponse<ClaimDeviceResult>> {
@@ -194,6 +232,116 @@ export class NovaApiClient {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Wi-Fi Profile Vault Methods
+  // ---------------------------------------------------------------------------
+  public async getWifiProfiles(
+    deviceId: string,
+    authToken?: string,
+    versionQuery?: number
+  ): Promise<ApiResponse<WifiProfileVaultResponse>> {
+    const query = typeof versionQuery === 'number' ? `?version=${versionQuery}` : '';
+    return this.request<WifiProfileVaultResponse>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles${query}`,
+      {
+        method: 'GET',
+      },
+      authToken
+    );
+  }
+
+  public async createWifiProfile(
+    deviceId: string,
+    payload: CreateWifiProfilePayload,
+    authToken?: string
+  ): Promise<ApiResponse<{ profile: WifiProfile; vaultVersion: number }>> {
+    return this.request<{ profile: WifiProfile; vaultVersion: number }>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      authToken
+    );
+  }
+
+  public async updateWifiProfile(
+    deviceId: string,
+    profileId: string,
+    payload: UpdateWifiProfilePayload,
+    authToken?: string
+  ): Promise<ApiResponse<{ profile: WifiProfile; vaultVersion: number }>> {
+    return this.request<{ profile: WifiProfile; vaultVersion: number }>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles/${encodeURIComponent(profileId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+      authToken
+    );
+  }
+
+  public async bulkUpdateWifiProfiles(
+    deviceId: string,
+    payload: BulkUpdateWifiProfilesPayload,
+    authToken?: string
+  ): Promise<ApiResponse<WifiProfileVaultResponse>> {
+    return this.request<WifiProfileVaultResponse>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      authToken
+    );
+  }
+
+  public async deleteWifiProfile(
+    deviceId: string,
+    profileId: string,
+    authToken?: string
+  ): Promise<ApiResponse<{ deleted: boolean; profileId: string; vaultVersion: number }>> {
+    return this.request<{ deleted: boolean; profileId: string; vaultVersion: number }>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles/${encodeURIComponent(profileId)}`,
+      {
+        method: 'DELETE',
+      },
+      authToken
+    );
+  }
+
+  public async makeDefaultWifiProfile(
+    deviceId: string,
+    profileId: string,
+    authToken?: string
+  ): Promise<ApiResponse<{ profileId: string; isDefault: boolean; vaultVersion: number }>> {
+    return this.request<{ profileId: string; isDefault: boolean; vaultVersion: number }>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profiles/${encodeURIComponent(profileId)}/make-default`,
+      {
+        method: 'POST',
+      },
+      authToken
+    );
+  }
+
+  public async reportWifiProfileResult(
+    deviceId: string,
+    payload: WifiProfileResultPayload,
+    authToken?: string
+  ): Promise<ApiResponse<{ acknowledged: boolean; profileId?: string; result: string; serverTime: string }>> {
+    return this.request<{ acknowledged: boolean; profileId?: string; result: string; serverTime: string }>(
+      `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi-profile-result`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      authToken
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legacy / SoftAP Scan & Auth
+  // ---------------------------------------------------------------------------
   public async scanWifi(deviceId?: string): Promise<ApiResponse<WifiScanResult>> {
     if (this.useMock) {
       return mockApi.scanWifi();
