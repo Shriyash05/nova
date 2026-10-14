@@ -2,73 +2,87 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
-import { SignalStrength } from '../hardware/SignalStrength';
 import { NovaDeviceMockup } from '../hardware/NovaDeviceMockup';
 import { OledDisplayGuide } from '../hardware/OledDisplayGuide';
-import type { WifiNetwork, WifiCredentials } from '../../domain/wifi';
-import { Wifi, Bluetooth, Radio, Lock, RefreshCw, Eye, EyeOff, AlertTriangle, ArrowRight } from 'lucide-react';
+import { apiClient } from '../../api/client';
+import {
+  Radio,
+  ShieldCheck,
+  CheckCircle2,
+} from 'lucide-react';
 
 export interface WifiProvisionScreenProps {
-  onProvision: (credentials: WifiCredentials) => Promise<boolean>;
-  onScanNetworks: () => Promise<WifiNetwork[]>;
+  onProvision: (credentials: { ssid: string; password?: string }) => Promise<boolean>;
+  onScanNetworks: () => Promise<any[]>;
   isRecovery?: boolean;
   onCancelRecovery?: () => void;
 }
 
 export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
   onProvision,
-  onScanNetworks,
   isRecovery = false,
   onCancelRecovery,
 }) => {
-  const [method, setMethod] = useState<'web_ble' | 'soft_ap'>('web_ble');
-  const [networks, setNetworks] = useState<WifiNetwork[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [selectedSsid, setSelectedSsid] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [customSsid, setCustomSsid] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
 
-  // Initial network scan
+  // Automatic periodic check to detect when ESP32-C3 comes online
   useEffect(() => {
-    let mounted = true;
-    const fetchNetworks = async () => {
-      setIsScanning(true);
-      const res = await onScanNetworks();
-      if (mounted) {
-        setNetworks(res);
-        if (res.length > 0 && !selectedSsid) {
-          setSelectedSsid(res[0].ssid);
+    let active = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiClient.getDeviceStatus('nova_c3_84f3eba1');
+        if (active && res.success && res.data?.wifi?.state === 'connected') {
+          setStatusMessage('ESP32-C3 verified online! Redirecting...');
+          onProvision({ ssid: res.data.wifi.connectedSsid || 'Home_2.4G' });
         }
-        setIsScanning(false);
+      } catch {
+        // Device still offline, keep waiting
       }
-    };
-    fetchNetworks();
-    return () => {
-      mounted = false;
-    };
-  }, [onScanNetworks, selectedSsid]);
+    }, 4000);
 
-  const handleRefreshScan = async () => {
-    setIsScanning(true);
-    const res = await onScanNetworks();
-    setNetworks(res);
-    setIsScanning(false);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [onProvision]);
+
+  const handleManualCheck = async () => {
+    setIsCheckingStatus(true);
+    setStatusMessage(null);
+    try {
+      const res = await apiClient.getDeviceStatus('nova_c3_84f3eba1');
+      if (res.success && res.data?.wifi?.state === 'connected') {
+        setStatusMessage('NOVA is online and registered with cloud backend!');
+        await onProvision({ ssid: res.data.wifi.connectedSsid || 'Home_2.4G' });
+      } else {
+        setStatusMessage('Device is not yet online on your Wi-Fi network. Complete setup at 192.168.4.1.');
+      }
+    } catch {
+      setStatusMessage('Device status check failed. Ensure NOVA is powered on.');
+    } finally {
+      setIsCheckingStatus(false);
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSsid.trim()) return;
-
-    setIsSubmitting(true);
-    const success = await onProvision({
-      ssid: selectedSsid.trim(),
-      password: password ? password.trim() : undefined,
-      hidden: customSsid,
-    });
-    if (!success) {
-      setIsSubmitting(false);
+  const handleSimulateOnline = async () => {
+    setIsSimulating(true);
+    try {
+      await apiClient.bootstrapDevice({
+        deviceId: 'nova_c3_84f3eba1',
+        serialNumber: 'NOVA-C3-84F3EBA1',
+        macAddress: '84:F3:EB:A1:0C:4A',
+        wifiSsid: 'Home_Studio_2.4G',
+        ipAddress: '192.168.1.188',
+        rssi: -54,
+      });
+      setStatusMessage('Simulated ESP32-C3 SoftAP connection and TLS cloud registration.');
+      await onProvision({ ssid: 'Home_Studio_2.4G' });
+    } catch (err: unknown) {
+      setStatusMessage(err instanceof Error ? err.message : 'Simulation failed');
+    } finally {
+      setIsSimulating(false);
     }
   };
 
@@ -111,7 +125,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
       <div style={{ textAlign: 'center' }}>
         <h2 style={{ fontSize: '1.45rem', fontWeight: 600 }}>Connect NOVA to Wi-Fi</h2>
         <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-          NOVA connects directly to your 2.4GHz Wi-Fi router to sync voice notes to Notion in the background.
+          NOVA provisions directly via its local password-protected setup hotspot.
         </p>
       </div>
 
@@ -119,240 +133,183 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
       <NovaDeviceMockup
         size="sm"
         oledState={isRecovery ? 'offline' : 'wifi_setup'}
-        caption={isRecovery ? 'OLED: Recovery Mode • Awaiting New Wi-Fi' : 'OLED: Wi-Fi Setup • Connecting...'}
+        caption={isRecovery ? 'OLED: SoftAP Active • Setup: NOVA-C3-84F3' : 'OLED: SoftAP Active • Setup: NOVA-C3-84F3'}
       />
 
-      {/* Provisioning Channel Selector (Web BLE vs SoftAP) */}
-      <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-            Device Communication Channel:
+      {/* Hardware SoftAP Step-by-Step Guide */}
+      <Card glow>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Protected Local SoftAP Setup
+            </span>
+            <Badge variant="cyan">No App Required</Badge>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
-            <button
-              type="button"
-              onClick={() => setMethod('web_ble')}
-              style={{
-                background: method === 'web_ble' ? 'var(--accent-cyan-dim)' : 'var(--bg-surface-elevated)',
-                border: `1px solid ${method === 'web_ble' ? 'var(--accent-cyan)' : 'var(--border-subtle)'}`,
-                borderRadius: 'var(--radius-md)',
-                padding: '0.7rem 0.6rem',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                transition: 'all 150ms ease',
-              }}
-            >
-              <Bluetooth size={18} color={method === 'web_ble' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Web Bluetooth (BLE)
-              </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                Desktop / Android Chrome
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMethod('soft_ap')}
-              style={{
-                background: method === 'soft_ap' ? 'var(--accent-cyan-dim)' : 'var(--bg-surface-elevated)',
-                border: `1px solid ${method === 'soft_ap' ? 'var(--accent-cyan)' : 'var(--border-subtle)'}`,
-                borderRadius: 'var(--radius-md)',
-                padding: '0.7rem 0.6rem',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                transition: 'all 150ms ease',
-              }}
-            >
-              <Radio size={18} color={method === 'soft_ap' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Guided SoftAP Hotspot
-              </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                iOS Mobile Safari Standard
-              </span>
-            </button>
-          </div>
-
-          {method === 'soft_ap' && (
-            <div
-              style={{
-                background: 'rgba(255, 255, 255, 0.03)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.65rem 0.8rem',
-                fontSize: '0.78rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.4,
-              }}
-            >
-              <strong>iPhone / Mobile Safari:</strong> Connect your phone Wi-Fi to hotspot{' '}
-              <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>
-                NOVA-Setup-84F3
-              </span>
-              . The browser relays credentials without requiring an iOS app!
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Network Selection and Password Input Form */}
-      <Card>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-              <label className="form-label" style={{ margin: 0 }}>
-                Select 2.4GHz Wi-Fi Network
-              </label>
-              <button
-                type="button"
-                onClick={handleRefreshScan}
-                disabled={isScanning}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            {/* Step 1 */}
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+              <div
                 style={{
-                  background: 'none',
-                  border: 'none',
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-cyan-dim)',
                   color: 'var(--accent-cyan)',
-                  fontSize: '0.76rem',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.25rem',
-                  cursor: 'pointer',
+                  justifyContent: 'center',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  marginTop: '0.1rem',
                 }}
               >
-                <RefreshCw size={12} className={isScanning ? 'spinner' : ''} />
-                <span>{isScanning ? 'Scanning...' : 'Rescan'}</span>
-              </button>
+                1
+              </div>
+              <div style={{ fontSize: '0.84rem', lineHeight: 1.45 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Connect to NOVA's Hotspot:</strong>
+                <div style={{ color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  On your phone or laptop, open Wi-Fi settings and join:
+                </div>
+                <div
+                  className="font-mono"
+                  style={{
+                    display: 'inline-block',
+                    background: 'rgba(0, 240, 255, 0.08)',
+                    color: 'var(--accent-cyan)',
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px',
+                    fontSize: '0.82rem',
+                    marginTop: '0.3rem',
+                    border: '1px solid rgba(0, 240, 255, 0.25)',
+                  }}
+                >
+                  SSID: NOVA-Setup-84F3
+                </div>
+              </div>
             </div>
 
-            {!customSsid ? (
-              <div className="wifi-list">
-                {networks.map((net) => {
-                  const isSelected = selectedSsid === net.ssid;
-                  return (
-                    <div
-                      key={net.ssid}
-                      className={`wifi-item ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedSsid(net.ssid)}
-                    >
-                      <div className="wifi-meta">
-                        <Wifi size={16} color={isSelected ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-                        <span className="wifi-name">{net.ssid}</span>
-                        {net.security !== 'open' && <Lock size={12} color="var(--text-muted)" />}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <SignalStrength rssi={net.rssi} />
-                        {isSelected && <Badge variant="cyan">Selected</Badge>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="form-group">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Enter Network SSID"
-                  value={selectedSsid}
-                  onChange={(e) => setSelectedSsid(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => {
-                setCustomSsid(!customSsid);
-                if (!customSsid) setSelectedSsid('');
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                fontSize: '0.78rem',
-                textDecoration: 'underline',
-                cursor: 'pointer',
-                marginTop: '0.2rem',
-              }}
-            >
-              {customSsid ? '← Pick from visible networks' : '+ Join hidden or manual network'}
-            </button>
-          </div>
-
-          {/* Wi-Fi Password */}
-          <div className="form-group">
-            <label className="form-label" htmlFor="wifiPassInput">
-              Wi-Fi Password
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                id="wifiPassInput"
-                type={showPassword ? 'text' : 'password'}
-                className="form-input"
-                placeholder="Enter WPA2/WPA3 password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
+            {/* Step 2 */}
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+              <div
                 style={{
-                  position: 'absolute',
-                  right: '12px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  cursor: 'pointer',
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-cyan-dim)',
+                  color: 'var(--accent-cyan)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  marginTop: '0.1rem',
                 }}
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+                2
+              </div>
+              <div style={{ fontSize: '0.84rem', lineHeight: 1.45 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Enter Router Password Locally:</strong>
+                <div style={{ color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  A setup portal will pop up automatically, or visit{' '}
+                  <span className="font-mono" style={{ color: 'var(--text-primary)' }}>
+                    http://192.168.4.1
+                  </span>
+                  . Select your 2.4GHz network and submit.
+                </div>
+              </div>
             </div>
-            <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
-              Credentials are sent directly to your ESP32-C3 device and never stored by our cloud servers.
-            </span>
+
+            {/* Step 3 */}
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+              <div
+                style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-cyan-dim)',
+                  color: 'var(--accent-cyan)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  marginTop: '0.1rem',
+                }}
+              >
+                3
+              </div>
+              <div style={{ fontSize: '0.84rem', lineHeight: 1.45 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Direct Hardware Handshake:</strong>
+                <div style={{ color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  Wi-Fi credentials are saved directly to ESP32 flash over the local session. They are never sent to the cloud.
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* 2.4GHz constraint notice */}
+          {/* Privacy Guarantee */}
           <div
             style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.65rem 0.8rem',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              background: 'var(--status-warning-dim)',
-              border: '1px solid rgba(245, 158, 11, 0.25)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.55rem 0.75rem',
-              fontSize: '0.76rem',
-              color: '#fbbf24',
             }}
           >
-            <AlertTriangle size={15} style={{ flexShrink: 0 }} />
-            <span>ESP32-C3 Super Mini requires a 2.4GHz Wi-Fi band (5GHz-only bands are not supported).</span>
+            <ShieldCheck size={16} color="var(--status-online)" />
+            <span style={{ fontSize: '0.76rem', color: '#a7f3d0' }}>
+              Zero Cloud Exposure: Your home Wi-Fi password never passes through Vercel or public backend servers.
+            </span>
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!selectedSsid.trim() || isSubmitting}
-            isLoading={isSubmitting}
-            rightIcon={<ArrowRight size={16} />}
-          >
-            {isSubmitting ? 'Transmitting to NOVA...' : 'Connect to Network'}
-          </Button>
-        </form>
+          {statusMessage && (
+            <div
+              style={{
+                fontSize: '0.82rem',
+                padding: '0.6rem 0.8rem',
+                borderRadius: 'var(--radius-sm)',
+                background: statusMessage.includes('verified') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                color: statusMessage.includes('verified') ? '#34d399' : 'var(--text-secondary)',
+              }}
+            >
+              {statusMessage}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.4rem' }}>
+            <Button
+              variant="primary"
+              size="default"
+              isLoading={isCheckingStatus}
+              leftIcon={<CheckCircle2 size={16} />}
+              onClick={handleManualCheck}
+            >
+              I've Connected NOVA to Wi-Fi
+            </Button>
+
+            {!import.meta.env.PROD && (
+              <Button
+                variant="outline"
+                size="sm"
+                isLoading={isSimulating}
+                leftIcon={<Radio size={14} />}
+                onClick={handleSimulateOnline}
+              >
+                Dev: Simulate Device Online
+              </Button>
+            )}
+          </div>
+        </div>
       </Card>
 
+      {/* OLED Visual Reference Guide */}
       <OledDisplayGuide />
     </div>
   );

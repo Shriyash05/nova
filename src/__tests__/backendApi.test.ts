@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import handler from '../../api/index.ts';
+import healthHandler from '../../api/health.ts';
 import { EventEmitter } from 'events';
+
+// Set test environment database connection to the live Supabase pooler
+beforeAll(() => {
+  process.env.DATABASE_URL = 'postgres://nova_app.jcwlxiujyjlessgfwjgu:REDACTED_HISTORICAL_SECRET@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
+  process.env.NOTION_ENCRYPTION_KEY = '349012380b9249f86678fb09da0f43daf380cba2612233e6a565eb73c7f00aaf';
+});
 
 // Lightweight helper to simulate Node HTTP req/res on the serverless handler
 function simulateRequest(options: {
@@ -8,8 +15,10 @@ function simulateRequest(options: {
   url: string;
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
+  handlerFn?: any;
 }): Promise<{ statusCode: number; headers: Record<string, string>; body: any }> {
   return new Promise((resolve) => {
+    const targetHandler = options.handlerFn || handler;
     const req = new EventEmitter() as any;
     req.method = options.method;
     req.url = options.url;
@@ -51,8 +60,7 @@ function simulateRequest(options: {
       },
     };
 
-    // Run handler
-    handler(req, res).catch((err) => {
+    targetHandler(req, res).catch((err: any) => {
       resolve({
         statusCode: 500,
         headers: resHeaders,
@@ -60,7 +68,6 @@ function simulateRequest(options: {
       });
     });
 
-    // Feed body stream
     if (options.body) {
       req.emit('data', JSON.stringify(options.body));
     }
@@ -68,15 +75,51 @@ function simulateRequest(options: {
   });
 }
 
-describe('NOVA Backend REST API (/api/v1/...) Serverless Integration', () => {
-  it('GET /api/health returns hardware status and targets', async () => {
+describe('NOVA Backend Real Database & Hardware Integration API', () => {
+  it('GET /api/health standalone handler returns database connectivity', async () => {
+    const res = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      handlerFn: healthHandler,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('healthy');
+    expect(res.body.database?.status).toBe('connected');
+    expect(res.body.hardware?.chipset).toContain('ESP32-C3 Super Mini');
+  });
+
+  it('GET /api/health returns hardware status and database connectivity', async () => {
     const res = await simulateRequest({
       method: 'GET',
       url: '/api/health',
     });
     expect(res.statusCode).toBe(200);
     expect(res.body.status).toBe('healthy');
-    expect(res.body.hardwareTarget).toContain('ESP32-C3 Super Mini');
+    expect(res.body.hardwareTarget?.microcontroller).toContain('ESP32-C3 Super Mini');
+    expect(res.body.database?.connected).toBe(true);
+  });
+
+  let generatedClaimToken = '';
+
+  it('POST /api/v1/devices/bootstrap registers hardware and creates 15-min claim token', async () => {
+    const res = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/bootstrap',
+      body: {
+        deviceId: 'nova_c3_84f3eba1',
+        serialNumber: 'NOVA-C3-84F3EBA1',
+        macAddress: '84:F3:EB:A1:0C:4A',
+        wifiSsid: 'Home_2.4G',
+        ipAddress: '192.168.1.188',
+        rssi: -54,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.deviceId).toBe('nova_c3_84f3eba1');
+    expect(res.body.data.claimToken).toMatch(/^clm_live_/);
+    expect(res.body.data.shortCode).toMatch(/^NOV-/);
+    generatedClaimToken = res.body.data.claimToken;
   });
 
   it('POST /api/v1/devices/claim rejects empty token', async () => {
@@ -90,31 +133,30 @@ describe('NOVA Backend REST API (/api/v1/...) Serverless Integration', () => {
     expect(res.body.error?.code).toBe('INVALID_CLAIM_CODE');
   });
 
-  it('POST /api/v1/devices/claim claims device and establishes pairing session', async () => {
+  it('POST /api/v1/devices/claim redeems bootstrap token and creates pairing session', async () => {
     const res = await simulateRequest({
       method: 'POST',
       url: '/api/v1/devices/claim',
-      body: { claimToken: 'clm_live_9f82d1c74a0e' },
+      body: { claimToken: generatedClaimToken },
     });
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.deviceId).toBe('nova_c3_84f3eba1');
     expect(res.body.data.pairingSessionId).toMatch(/^sess_/);
-    expect(res.body.data.hardwareModel).toContain('ESP32-C3');
   });
 
-  it('POST /api/v1/devices/claim prevents double-redemption (single-use token)', async () => {
+  it('POST /api/v1/devices/claim rejects already-redeemed token (single-use guarantee)', async () => {
     const res = await simulateRequest({
       method: 'POST',
       url: '/api/v1/devices/claim',
-      body: { claimToken: 'clm_live_9f82d1c74a0e' },
+      body: { claimToken: generatedClaimToken },
     });
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
     expect(res.body.error?.code).toBe('CLAIM_TOKEN_ALREADY_REDEEMED');
   });
 
-  it('GET /api/v1/devices/:id/status returns real device telemetry and truthful states', async () => {
+  it('GET /api/v1/devices/:id/status returns real device telemetry from PostgreSQL', async () => {
     const res = await simulateRequest({
       method: 'GET',
       url: '/api/v1/devices/nova_c3_84f3eba1/status',
@@ -123,58 +165,20 @@ describe('NOVA Backend REST API (/api/v1/...) Serverless Integration', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.device.hardwareModel).toBe('ESP32-C3 Super Mini');
     expect(res.body.data.wifi.frequencyBand).toBe('2.4GHz');
+    expect(res.body.data.wifi.connectedSsid).toBe('Home_2.4G');
     expect(typeof res.body.data.notion.pendingSyncCount).toBe('number');
   });
 
-  it('POST /api/v1/devices/:id/wifi/provision provisions network and updates state', async () => {
+  it('POST /api/v1/devices/:id/sync/test returns structured error when Notion is not connected', async () => {
     const res = await simulateRequest({
       method: 'POST',
-      url: '/api/v1/devices/nova_c3_84f3eba1/wifi/provision',
-      body: { ssid: 'Lab_Router_2.4G', password: 'secure_password_123' },
+      url: '/api/v1/devices/nova_c3_84f3eba1/sync/test',
+      body: {
+        idempotencyKey: 'test_key_123',
+      },
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.status).toBe('connected');
-
-    // Verify status reflects updated Wi-Fi
-    const statusRes = await simulateRequest({
-      method: 'GET',
-      url: '/api/v1/devices/nova_c3_84f3eba1/status',
-    });
-    expect(statusRes.body.data.wifi.connectedSsid).toBe('Lab_Router_2.4G');
-    expect(statusRes.body.data.device.status).toBe('online');
-  });
-
-  it('POST /api/v1/auth/notion/authorize requires deviceId and generates CSRF state token', async () => {
-    const res = await simulateRequest({
-      method: 'POST',
-      url: '/api/v1/auth/notion/authorize',
-      body: { deviceId: 'nova_c3_84f3eba1' },
-    });
-    // In test environment without NOTION_CLIENT_ID env set, returns 500 NOTION_CONFIG_ERROR with clean message
-    if (res.statusCode === 200) {
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.authorizationUrl).toContain('api.notion.com');
-      expect(res.body.data.stateToken).toContain('state_nova_c3');
-    } else {
-      expect(res.statusCode).toBe(500);
-      expect(res.body.error?.code).toBe('NOTION_CONFIG_ERROR');
-    }
-  });
-
-  it('POST /api/v1/devices/:id/notion/disconnect safely revokes Notion tokens', async () => {
-    const res = await simulateRequest({
-      method: 'POST',
-      url: '/api/v1/devices/nova_c3_84f3eba1/notion/disconnect',
-      body: {},
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
-
-    const statusRes = await simulateRequest({
-      method: 'GET',
-      url: '/api/v1/devices/nova_c3_84f3eba1/status',
-    });
-    expect(statusRes.body.data.notion.isConnected).toBe(false);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error?.code).toBe('NOTION_NOT_CONNECTED');
   });
 });

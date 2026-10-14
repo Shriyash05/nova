@@ -94,7 +94,20 @@ export class NovaApiClient {
     }
   }
 
-  // Real REST API Methods calling /api/v1/...
+  public async bootstrapDevice(payload: {
+    deviceId: string;
+    serialNumber: string;
+    macAddress: string;
+    wifiSsid?: string;
+    ipAddress?: string;
+    rssi?: number;
+  }): Promise<ApiResponse<{ deviceId: string; claimToken: string; shortCode: string; portalUrl: string }>> {
+    return this.request('/api/v1/devices/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   public async claimDevice(payload: ClaimDevicePayload): Promise<ApiResponse<ClaimDeviceResult>> {
     if (this.useMock) {
       return mockApi.claimDevice(payload);
