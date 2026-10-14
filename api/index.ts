@@ -165,6 +165,40 @@ async function queryDb<T = any>(sql: string, params: unknown[] = []): Promise<T[
   return result.rows as T[];
 }
 
+async function withTransaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const p = getPool();
+  if (!p) {
+    throw new Error('DATABASE_NOT_CONFIGURED: DATABASE_URL is required to perform persistent database operations.');
+  }
+  const client = await p.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function txQuery<T>(client: pg.PoolClient, sql: string, params: unknown[] = []): Promise<T[]> {
+  const result = await client.query(sql, params);
+  return result.rows as T[];
+}
+
+interface TxError {
+  errorStatus: number;
+  errorCode: string;
+  errorMessage: string;
+}
+
+function isTxError(obj: unknown): obj is TxError {
+  return Boolean(obj && typeof obj === 'object' && 'errorStatus' in obj && typeof (obj as TxError).errorStatus === 'number');
+}
+
 // -----------------------------------------------------------------------------
 // Request / Response Helpers
 // -----------------------------------------------------------------------------
@@ -649,6 +683,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const ipAddress = typeof telemetry.ipAddress === 'string' ? telemetry.ipAddress : null;
       const queueCount = typeof telemetry.queueCount === 'number' ? Math.max(0, telemetry.queueCount) : 0;
       const oledState = typeof telemetry.oledState === 'string' ? telemetry.oledState : 'idle';
+      const wifiSsid = typeof telemetry.wifiSsid === 'string' ? telemetry.wifiSsid : (typeof telemetry.ssid === 'string' ? telemetry.ssid : null);
 
       const updateSql = `
         UPDATE devices SET
@@ -658,6 +693,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           ip_address = COALESCE($5, ip_address),
           queue_count = COALESCE($6, queue_count),
           oled_state = COALESCE($7, oled_state),
+          wifi_ssid = COALESCE($8, wifi_ssid),
           status = 'online',
           last_heartbeat = NOW(),
           updated_at = NOW()
@@ -672,6 +708,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         ipAddress,
         queueCount,
         oledState,
+        wifiSsid,
       ]);
 
       if (updatedRows.length === 0) {
@@ -816,6 +853,12 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       }
 
       const device = devices[0];
+      const HEARTBEAT_STALE_MS = 90 * 1000;
+      const lastHeartbeatMs = device.last_heartbeat ? new Date(device.last_heartbeat).getTime() : 0;
+      const isFresh = lastHeartbeatMs > 0 && (Date.now() - lastHeartbeatMs) <= HEARTBEAT_STALE_MS;
+      const isOnline = Boolean(device.wifi_connected && isFresh);
+      const calculatedStatus = isOnline ? 'online' : 'offline';
+
       const notionAuths = await queryDb<NotionAuthRecord>('SELECT * FROM notion_authorizations WHERE device_id = $1', [targetDeviceId]);
       const pendingRes = await queryDb<{ count: string }>(
         "SELECT count(*) as count FROM device_actions WHERE device_id = $1 AND status = 'pending'",
@@ -824,27 +867,76 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const pendingSyncCount = parseInt(pendingRes[0]?.count || '0', 10);
       const notionAuth = notionAuths[0] || null;
 
+      // Current connected profile (if device is online and reports wifi_ssid)
+      let connectedProfile: { id: string; name: string; ssid: string; voiceSlot: string; slotNumber: number } | null = null;
+      if (isOnline && device.wifi_ssid) {
+        const connRows = await queryDb<WifiProfileRecord>(
+          'SELECT id, name, ssid, voice_slot, slot_number FROM wifi_profiles WHERE device_id = $1 AND ssid = $2 LIMIT 1',
+          [targetDeviceId, device.wifi_ssid]
+        );
+        if (connRows.length > 0) {
+          connectedProfile = {
+            id: connRows[0].id,
+            name: connRows[0].name,
+            ssid: connRows[0].ssid,
+            voiceSlot: connRows[0].voice_slot,
+            slotNumber: connRows[0].slot_number,
+          };
+        }
+      }
+
+      // Default profile
+      const defRows = await queryDb<WifiProfileRecord>(
+        'SELECT id, name, ssid, voice_slot, slot_number FROM wifi_profiles WHERE device_id = $1 AND is_default = TRUE LIMIT 1',
+        [targetDeviceId]
+      );
+      const defaultProfile = defRows.length > 0 ? {
+        id: defRows[0].id,
+        name: defRows[0].name,
+        ssid: defRows[0].ssid,
+        voiceSlot: defRows[0].voice_slot,
+        slotNumber: defRows[0].slot_number,
+      } : null;
+
+      // Latest connection result
+      const resultRows = await queryDb<WifiProfileRecord>(
+        'SELECT last_connection_result, last_attempted_at, last_rssi FROM wifi_profiles WHERE device_id = $1 ORDER BY last_attempted_at DESC NULLS LAST LIMIT 1',
+        [targetDeviceId]
+      );
+      const latestConnectionResult = resultRows.length > 0 && resultRows[0].last_attempted_at ? {
+        result: resultRows[0].last_connection_result,
+        attemptedAt: resultRows[0].last_attempted_at,
+        rssi: resultRows[0].last_rssi,
+      } : null;
+
       sendJson(res, 200, {
         success: true,
         data: {
+          deviceId: device.id,
+          online: isOnline,
+          status: calculatedStatus,
+          lastSeenAt: device.last_heartbeat,
+          connectedProfile,
+          defaultProfile,
+          latestConnectionResult,
           device: {
             deviceId: device.id,
             serialNumber: device.serial_number,
             hardwareModel: device.hardware_model,
             firmwareVersion: device.firmware_version,
-            status: device.status,
-            oledState: device.oled_state || 'idle',
+            status: calculatedStatus,
+            oledState: isOnline ? (device.oled_state || 'idle') : 'offline',
             queueCount: device.queue_count || 0,
             wifiVaultVersion: device.wifi_vault_version || 1,
             lastHeartbeat: device.last_heartbeat,
-            ipAddress: device.ip_address,
+            ipAddress: isOnline ? device.ip_address : null,
           },
           wifi: {
-            state: device.wifi_connected || device.wifi_ssid ? 'connected' : 'disconnected',
-            connected: Boolean(device.wifi_connected),
-            connectedSsid: device.wifi_ssid,
-            rssi: device.wifi_rssi,
-            ipAddress: device.ip_address,
+            state: isOnline ? 'connected' : 'disconnected',
+            connected: isOnline,
+            connectedSsid: isOnline ? device.wifi_ssid : null,
+            rssi: isOnline ? device.wifi_rssi : null,
+            ipAddress: isOnline ? device.ip_address : null,
             macAddress: device.mac_address,
             frequencyBand: '2.4GHz',
           },
@@ -869,6 +961,68 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // =========================================================================
     // 8. MULTI-WI-FI PROFILE VAULT ENDPOINTS
     // =========================================================================
+
+    // 8.0 GET /api/v1/devices/:deviceId/wifi-profiles/boot
+    // Dedicated boot configuration endpoint for ESP32-C3 firmware.
+    // Returns ONLY the single default profile needed for automatic boot connection over TLS.
+    // Strictly enforces cross-device isolation (403 if credential belongs to another device).
+    const wifiBootMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/wifi-profiles\/boot$/);
+    if (wifiBootMatch && method === 'GET') {
+      const targetDeviceId = decodeURIComponent(wifiBootMatch[1]);
+      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!auth.authorized) {
+        sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
+        return;
+      }
+
+      const devices = await queryDb<DeviceRecord>('SELECT * FROM devices WHERE id = $1', [targetDeviceId]);
+      if (devices.length === 0) {
+        sendJson(res, 404, { success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+        return;
+      }
+
+      const defRows = await queryDb<WifiProfileRecord>(
+        'SELECT * FROM wifi_profiles WHERE device_id = $1 AND is_default = TRUE LIMIT 1',
+        [targetDeviceId]
+      );
+
+      const isFirmware = auth.authType === 'device_secret';
+      if (defRows.length === 0) {
+        sendJson(res, 200, {
+          success: true,
+          data: {
+            deviceId: targetDeviceId,
+            vaultVersion: devices[0]?.wifi_vault_version || 1,
+            hasDefault: false,
+            defaultProfile: null,
+            message: 'No default boot profile configured for device.',
+          },
+        });
+        return;
+      }
+
+      const p = defRows[0];
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          vaultVersion: devices[0]?.wifi_vault_version || 1,
+          hasDefault: true,
+          defaultProfile: {
+            id: p.id,
+            name: p.name,
+            voiceSlot: p.voice_slot,
+            slotNumber: p.slot_number,
+            ssid: p.ssid,
+            isDefault: true,
+            version: p.version,
+            password: isFirmware && p.encrypted_password ? decryptSecret(p.encrypted_password) : undefined,
+            hasPassword: Boolean(p.encrypted_password),
+          },
+        },
+      });
+      return;
+    }
 
     // 8.1 GET /api/v1/devices/:deviceId/wifi-profiles
     // Fetches profile vault with ETag and versioning support.
@@ -985,63 +1139,79 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      // Fetch existing profiles to preserve existing passwords if not changed
-      const existing = await queryDb<WifiProfileRecord>('SELECT * FROM wifi_profiles WHERE device_id = $1', [targetDeviceId]);
-      const existingMap = new Map(existing.map((p) => [p.id, p]));
-
-      // Clear existing profiles and re-insert with continuous slot numbers
-      await queryDb('DELETE FROM wifi_profiles WHERE device_id = $1', [targetDeviceId]);
-
       for (let i = 0; i < inputProfiles.length; i++) {
-        const p = inputProfiles[i];
-        const slotNumber = i + 1;
-        const voiceSlot = VOICE_SLOTS[i];
-        const profileId = (typeof p.id === 'string' && p.id.trim()) ? p.id.trim() : `prof_${crypto.randomBytes(6).toString('hex')}`;
-        const name = (typeof p.name === 'string' && p.name.trim()) ? p.name.trim() : `Network ${slotNumber}`;
-        const ssid = (typeof p.ssid === 'string' && p.ssid.trim()) ? p.ssid.trim() : '';
-
+        const ssid = (typeof inputProfiles[i]?.ssid === 'string' && inputProfiles[i].ssid.trim()) ? inputProfiles[i].ssid.trim() : '';
         if (!ssid) {
-          sendJson(res, 400, { success: false, error: { code: 'SSID_REQUIRED', message: `Profile at slot ${slotNumber} is missing SSID.` } });
+          sendJson(res, 400, { success: false, error: { code: 'SSID_REQUIRED', message: `Profile at slot ${i + 1} is missing SSID.` } });
           return;
         }
-
-        let encryptedPassword: string | null = null;
-        if (typeof p.password === 'string' && p.password.length > 0) {
-          encryptedPassword = encryptSecret(p.password);
-        } else if (p.id && existingMap.has(p.id)) {
-          encryptedPassword = existingMap.get(p.id)!.encrypted_password;
-        }
-
-        const isDefault = Boolean(p.isDefault);
-
-        await queryDb(
-          `INSERT INTO wifi_profiles (
-            id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
-          [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
-        );
       }
 
-      // Bump device vault version
-      const updatedDevices = await queryDb<DeviceRecord>(
-        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
-        [targetDeviceId]
-      );
-      const newVersion = updatedDevices[0]?.wifi_vault_version || 1;
+      const txResult = await withTransaction(async (client) => {
+        // Lock existing profiles for this device
+        const existing = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 FOR UPDATE',
+          [targetDeviceId]
+        );
+        const existingMap = new Map(existing.map((p) => [p.id, p]));
 
-      const finalProfiles = await queryDb<WifiProfileRecord>(
-        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
-        [targetDeviceId]
-      );
+        // Clear existing profiles and re-insert with continuous slot numbers
+        await txQuery(client, 'DELETE FROM wifi_profiles WHERE device_id = $1', [targetDeviceId]);
+
+        for (let i = 0; i < inputProfiles.length; i++) {
+          const p = inputProfiles[i];
+          const slotNumber = i + 1;
+          const voiceSlot = VOICE_SLOTS[i];
+          const profileId = (typeof p.id === 'string' && p.id.trim()) ? p.id.trim() : `prof_${crypto.randomBytes(6).toString('hex')}`;
+          const name = (typeof p.name === 'string' && p.name.trim()) ? p.name.trim() : `Network ${slotNumber}`;
+          const ssid = p.ssid.trim();
+
+          let encryptedPassword: string | null = null;
+          if (typeof p.password === 'string' && p.password.length > 0) {
+            encryptedPassword = encryptSecret(p.password);
+          } else if (p.id && existingMap.has(p.id)) {
+            encryptedPassword = existingMap.get(p.id)!.encrypted_password;
+          }
+
+          const isDefault = Boolean(p.isDefault);
+
+          await txQuery(
+            client,
+            `INSERT INTO wifi_profiles (
+              id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
+            [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
+          );
+        }
+
+        const updatedDevices = await txQuery<DeviceRecord>(
+          client,
+          'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+          [targetDeviceId]
+        );
+        const newVersion = updatedDevices[0]?.wifi_vault_version || 1;
+
+        const finalProfiles = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
+          [targetDeviceId]
+        );
+
+        return {
+          newVersion,
+          finalProfiles,
+        };
+      });
 
       sendJson(res, 200, {
         success: true,
         data: {
           deviceId: targetDeviceId,
-          vaultVersion: newVersion,
-          profileCount: finalProfiles.length,
+          vaultVersion: txResult.newVersion,
+          profileCount: txResult.finalProfiles.length,
           maxProfiles: 5,
-          profiles: finalProfiles.map((p) => ({
+          profiles: txResult.finalProfiles.map((p) => ({
             id: p.id,
             name: p.name,
             voiceSlot: p.voice_slot,
@@ -1070,27 +1240,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const existingProfiles = await queryDb<WifiProfileRecord>(
-        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
-        [targetDeviceId]
-      );
-
-      if (existingProfiles.length >= 5) {
-        sendJson(res, 400, {
-          success: false,
-          error: {
-            code: 'VAULT_LIMIT_REACHED',
-            message: 'Device Wi-Fi vault supports a maximum of 5 profiles.',
-          },
-        });
-        return;
-      }
-
-      const name = (req.body?.name as string)?.trim() || `Network ${existingProfiles.length + 1}`;
       const ssid = (req.body?.ssid as string)?.trim();
-      const password = req.body?.password as string | undefined;
-      const isDefault = Boolean(req.body?.isDefault);
-
       if (!ssid) {
         sendJson(res, 400, {
           success: false,
@@ -1099,30 +1249,49 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const slotNumber = existingProfiles.length + 1;
-      const voiceSlot = VOICE_SLOTS[slotNumber - 1];
-      const profileId = `prof_${crypto.randomBytes(6).toString('hex')}`;
-      const encryptedPassword = password ? encryptSecret(password) : null;
+      const password = req.body?.password as string | undefined;
+      const isDefault = Boolean(req.body?.isDefault);
 
-      if (isDefault) {
-        await queryDb('UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1', [targetDeviceId]);
-      }
+      const txResult = await withTransaction(async (client) => {
+        const existingProfiles = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC FOR UPDATE',
+          [targetDeviceId]
+        );
 
-      await queryDb(
-        `INSERT INTO wifi_profiles (
-          id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
-        [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
-      );
+        if (existingProfiles.length >= 5) {
+          return {
+            errorStatus: 400,
+            errorCode: 'VAULT_LIMIT_REACHED',
+            errorMessage: 'Device Wi-Fi vault supports a maximum of 5 profiles.',
+          };
+        }
 
-      const updatedDevices = await queryDb<DeviceRecord>(
-        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
-        [targetDeviceId]
-      );
+        const name = (req.body?.name as string)?.trim() || `Network ${existingProfiles.length + 1}`;
+        const slotNumber = existingProfiles.length + 1;
+        const voiceSlot = VOICE_SLOTS[slotNumber - 1];
+        const profileId = `prof_${crypto.randomBytes(6).toString('hex')}`;
+        const encryptedPassword = password ? encryptSecret(password) : null;
 
-      sendJson(res, 201, {
-        success: true,
-        data: {
+        if (isDefault) {
+          await txQuery(client, 'UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1', [targetDeviceId]);
+        }
+
+        await txQuery(
+          client,
+          `INSERT INTO wifi_profiles (
+            id, device_id, name, voice_slot, slot_number, ssid, encrypted_password, is_default, version, last_connection_result, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', NOW(), NOW())`,
+          [profileId, targetDeviceId, name, voiceSlot, slotNumber, ssid, encryptedPassword, isDefault]
+        );
+
+        const updatedDevices = await txQuery<DeviceRecord>(
+          client,
+          'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+          [targetDeviceId]
+        );
+
+        return {
           profile: {
             id: profileId,
             name,
@@ -1137,7 +1306,17 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
             lastRssi: null,
           },
           vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
-        },
+        };
+      });
+
+      if (isTxError(txResult)) {
+        sendJson(res, txResult.errorStatus, { success: false, error: { code: txResult.errorCode, message: txResult.errorMessage } });
+        return;
+      }
+
+      sendJson(res, 201, {
+        success: true,
+        data: txResult,
       });
       return;
     }
@@ -1154,34 +1333,45 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const target = await queryDb<WifiProfileRecord>(
-        'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2',
-        [targetDeviceId, targetProfileId]
-      );
+      const txResult = await withTransaction(async (client) => {
+        const target = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2 FOR UPDATE',
+          [targetDeviceId, targetProfileId]
+        );
 
-      if (target.length === 0) {
-        sendJson(res, 404, { success: false, error: { code: 'PROFILE_NOT_FOUND', message: 'Wi-Fi profile not found.' } });
-        return;
-      }
+        if (target.length === 0) {
+          return { errorStatus: 404, errorCode: 'PROFILE_NOT_FOUND', errorMessage: 'Wi-Fi profile not found.' };
+        }
 
-      // Atomically set default on target and clear on all other profiles
-      await queryDb('UPDATE wifi_profiles SET is_default = (id = $2), updated_at = NOW() WHERE device_id = $1', [
-        targetDeviceId,
-        targetProfileId,
-      ]);
+        // Atomically set default on target and clear on all other profiles
+        await txQuery(
+          client,
+          'UPDATE wifi_profiles SET is_default = (id = $2), updated_at = NOW() WHERE device_id = $1',
+          [targetDeviceId, targetProfileId]
+        );
 
-      const updatedDevices = await queryDb<DeviceRecord>(
-        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
-        [targetDeviceId]
-      );
+        const updatedDevices = await txQuery<DeviceRecord>(
+          client,
+          'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+          [targetDeviceId]
+        );
 
-      sendJson(res, 200, {
-        success: true,
-        data: {
+        return {
           profileId: targetProfileId,
           isDefault: true,
           vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
-        },
+        };
+      });
+
+      if (isTxError(txResult)) {
+        sendJson(res, txResult.errorStatus, { success: false, error: { code: txResult.errorCode, message: txResult.errorMessage } });
+        return;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        data: txResult,
       });
       return;
     }
@@ -1199,52 +1389,56 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const existingRows = await queryDb<WifiProfileRecord>(
-        'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2',
-        [targetDeviceId, targetProfileId]
-      );
+      const txResult = await withTransaction(async (client) => {
+        const existingRows = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2 FOR UPDATE',
+          [targetDeviceId, targetProfileId]
+        );
 
-      if (existingRows.length === 0) {
-        sendJson(res, 404, { success: false, error: { code: 'PROFILE_NOT_FOUND', message: 'Profile not found.' } });
-        return;
-      }
-      const existing = existingRows[0];
+        if (existingRows.length === 0) {
+          return { errorStatus: 404, errorCode: 'PROFILE_NOT_FOUND', errorMessage: 'Profile not found.' };
+        }
+        const existing = existingRows[0];
 
-      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : existing.name;
-      const ssid = typeof req.body?.ssid === 'string' ? req.body.ssid.trim() : existing.ssid;
-      const isDefault = typeof req.body?.isDefault === 'boolean' ? req.body.isDefault : existing.is_default;
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim() : existing.name;
+        const ssid = typeof req.body?.ssid === 'string' ? req.body.ssid.trim() : existing.ssid;
+        const isDefault = typeof req.body?.isDefault === 'boolean' ? req.body.isDefault : existing.is_default;
 
-      let encryptedPassword = existing.encrypted_password;
-      if (typeof req.body?.password === 'string' && req.body.password.length > 0) {
-        encryptedPassword = encryptSecret(req.body.password);
-      }
+        let encryptedPassword = existing.encrypted_password;
+        if (typeof req.body?.password === 'string' && req.body.password.length > 0) {
+          encryptedPassword = encryptSecret(req.body.password);
+        }
 
-      if (isDefault) {
-        await queryDb('UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1 AND id != $2', [targetDeviceId, targetProfileId]);
-      }
+        if (isDefault) {
+          await txQuery(client, 'UPDATE wifi_profiles SET is_default = FALSE WHERE device_id = $1 AND id != $2', [
+            targetDeviceId,
+            targetProfileId,
+          ]);
+        }
 
-      const updatedRows = await queryDb<WifiProfileRecord>(
-        `UPDATE wifi_profiles SET
-          name = $1,
-          ssid = $2,
-          encrypted_password = $3,
-          is_default = $4,
-          version = version + 1,
-          updated_at = NOW()
-         WHERE device_id = $5 AND id = $6
-         RETURNING *;`,
-        [name, ssid, encryptedPassword, isDefault, targetDeviceId, targetProfileId]
-      );
+        const updatedRows = await txQuery<WifiProfileRecord>(
+          client,
+          `UPDATE wifi_profiles SET
+            name = $1,
+            ssid = $2,
+            encrypted_password = $3,
+            is_default = $4,
+            version = version + 1,
+            updated_at = NOW()
+           WHERE device_id = $5 AND id = $6
+           RETURNING *;`,
+          [name, ssid, encryptedPassword, isDefault, targetDeviceId, targetProfileId]
+        );
 
-      const updatedDevices = await queryDb<DeviceRecord>(
-        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
-        [targetDeviceId]
-      );
+        const updatedDevices = await txQuery<DeviceRecord>(
+          client,
+          'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+          [targetDeviceId]
+        );
 
-      const updated = updatedRows[0];
-      sendJson(res, 200, {
-        success: true,
-        data: {
+        const updated = updatedRows[0];
+        return {
           profile: {
             id: updated.id,
             name: updated.name,
@@ -1260,7 +1454,17 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
             updatedAt: updated.updated_at,
           },
           vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
-        },
+        };
+      });
+
+      if (isTxError(txResult)) {
+        sendJson(res, txResult.errorStatus, { success: false, error: { code: txResult.errorCode, message: txResult.errorMessage } });
+        return;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        data: txResult,
       });
       return;
     }
@@ -1277,32 +1481,53 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      await queryDb('DELETE FROM wifi_profiles WHERE device_id = $1 AND id = $2', [targetDeviceId, targetProfileId]);
+      const txResult = await withTransaction(async (client) => {
+        const target = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 AND id = $2 FOR UPDATE',
+          [targetDeviceId, targetProfileId]
+        );
 
-      // Recompact remaining slots
-      const remaining = await queryDb<WifiProfileRecord>(
-        'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC',
-        [targetDeviceId]
-      );
+        if (target.length === 0) {
+          return { errorStatus: 404, errorCode: 'PROFILE_NOT_FOUND', errorMessage: 'Profile not found.' };
+        }
 
-      for (let i = 0; i < remaining.length; i++) {
-        const slot = i + 1;
-        const voice = VOICE_SLOTS[i];
-        await queryDb('UPDATE wifi_profiles SET slot_number = $1, voice_slot = $2 WHERE id = $3', [slot, voice, remaining[i].id]);
-      }
+        await txQuery(client, 'DELETE FROM wifi_profiles WHERE device_id = $1 AND id = $2', [targetDeviceId, targetProfileId]);
 
-      const updatedDevices = await queryDb<DeviceRecord>(
-        'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
-        [targetDeviceId]
-      );
+        // Recompact remaining slots
+        const remaining = await txQuery<WifiProfileRecord>(
+          client,
+          'SELECT * FROM wifi_profiles WHERE device_id = $1 ORDER BY slot_number ASC FOR UPDATE',
+          [targetDeviceId]
+        );
 
-      sendJson(res, 200, {
-        success: true,
-        data: {
+        for (let i = 0; i < remaining.length; i++) {
+          const slot = i + 1;
+          const voice = VOICE_SLOTS[i];
+          await txQuery(client, 'UPDATE wifi_profiles SET slot_number = $1, voice_slot = $2 WHERE id = $3', [slot, voice, remaining[i].id]);
+        }
+
+        const updatedDevices = await txQuery<DeviceRecord>(
+          client,
+          'UPDATE devices SET wifi_vault_version = COALESCE(wifi_vault_version, 1) + 1, updated_at = NOW() WHERE id = $1 RETURNING wifi_vault_version',
+          [targetDeviceId]
+        );
+
+        return {
           deleted: true,
           profileId: targetProfileId,
           vaultVersion: updatedDevices[0]?.wifi_vault_version || 1,
-        },
+        };
+      });
+
+      if (isTxError(txResult)) {
+        sendJson(res, txResult.errorStatus, { success: false, error: { code: txResult.errorCode, message: txResult.errorMessage } });
+        return;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        data: txResult,
       });
       return;
     }

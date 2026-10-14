@@ -249,6 +249,8 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
       <WifiProfilesVault
         deviceId={resolvedDeviceId}
         authToken={authToken}
+        isDeviceOnline={isDeviceOnline}
+        activeConnectedSsid={wifi.connectedSsid}
         onProfileChanged={onRefreshStatus}
       />
 

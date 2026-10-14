@@ -774,4 +774,172 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
     expect(authRes.body.success).toBe(true);
     expect(authRes.body.data.disconnected).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------
+  // 9. Dedicated Boot Profile Endpoint & Cross-Device Firmware Isolation
+  // ---------------------------------------------------------------------------
+  it('GET /api/v1/devices/:id/wifi-profiles/boot enforces authentication and returns 401 unauth', async () => {
+    const unauthRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/boot`,
+    });
+    expect(unauthRes.statusCode).toBe(401);
+  });
+
+  it('GET /api/v1/devices/:id/wifi-profiles/boot rejects cross-device credential with 403', async () => {
+    const forbiddenRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/boot`,
+      headers: {
+        Authorization: `Bearer ${otherDeviceKey}`,
+      },
+    });
+    expect(forbiddenRes.statusCode).toBe(403);
+    expect(['FORBIDDEN', 'CROSS_DEVICE_FORBIDDEN']).toContain(forbiddenRes.body.error?.code);
+  });
+
+  it('GET /api/v1/devices/:id/wifi-profiles/boot returns ONLY default profile with decrypted password for hardware', async () => {
+    // Ensure there is a default profile
+    const defRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/${createdProfileId2}/make-default`,
+      headers: {
+        Authorization: `Bearer ${establishedPairingSessionId}`,
+      },
+    });
+    expect(defRes.statusCode).toBe(200);
+
+    const bootRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/boot`,
+      headers: {
+        Authorization: `Bearer ${issuedDeviceKey}`,
+      },
+    });
+    expect(bootRes.statusCode).toBe(200);
+    expect(bootRes.body.success).toBe(true);
+    expect(bootRes.body.data.hasDefault).toBe(true);
+    expect(bootRes.body.data.defaultProfile).toBeDefined();
+    expect(bootRes.body.data.defaultProfile.id).toBe(createdProfileId2);
+    expect(bootRes.body.data.defaultProfile.isDefault).toBe(true);
+    expect(bootRes.body.data.defaultProfile.password).toBe('office_secret_pass_456');
+    // Ensure it does NOT return a list of profiles, only the single default boot profile
+    expect(bootRes.body.data.profiles).toBeUndefined();
+  }, 20000);
+
+  // ---------------------------------------------------------------------------
+  // 10. Deletion of Default Profile & Zero-Default Vault State
+  // ---------------------------------------------------------------------------
+  it('Deleting default profile recompacts slots and leaves vault without default', async () => {
+    const delRes = await simulateRequest({
+      method: 'DELETE',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/${createdProfileId2}`,
+      headers: {
+        Authorization: `Bearer ${establishedPairingSessionId}`,
+      },
+    });
+    expect(delRes.statusCode).toBe(200);
+    expect(delRes.body.data.deleted).toBe(true);
+
+    const checkRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles`,
+      headers: { Authorization: `Bearer ${establishedPairingSessionId}` },
+    });
+    expect(checkRes.statusCode).toBe(200);
+    const hasAnyDefault = checkRes.body.data.profiles.some((p: any) => p.isDefault);
+    expect(hasAnyDefault).toBe(false);
+
+    // Boot endpoint now returns hasDefault: false
+    const bootRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/boot`,
+      headers: { Authorization: `Bearer ${issuedDeviceKey}` },
+    });
+    expect(bootRes.statusCode).toBe(200);
+    expect(bootRes.body.data.hasDefault).toBe(false);
+    expect(bootRes.body.data.defaultProfile).toBeNull();
+  }, 20000);
+
+  // ---------------------------------------------------------------------------
+  // 11. Stale-Heartbeat Handling (>90s = offline)
+  // ---------------------------------------------------------------------------
+  it('GET /api/v1/devices/:id/status marks device offline when heartbeat >90s stale', async () => {
+    const pool = new Pool({
+      connectionString: DB_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+    });
+    try {
+      // Set last_heartbeat to 3 minutes ago
+      await pool.query(
+        "UPDATE devices SET last_heartbeat = NOW() - INTERVAL '3 minutes', wifi_connected = TRUE WHERE id = $1",
+        [REAL_DEVICE_ID]
+      );
+    } finally {
+      await pool.end();
+    }
+
+    const staleStatusRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/status`,
+      headers: { Authorization: `Bearer ${establishedPairingSessionId}` },
+    });
+    expect(staleStatusRes.statusCode).toBe(200);
+    expect(staleStatusRes.body.data.online).toBe(false);
+    expect(staleStatusRes.body.data.status).toBe('offline');
+    expect(staleStatusRes.body.data.wifi.connected).toBe(false);
+    expect(staleStatusRes.body.data.wifi.state).toBe('disconnected');
+
+    // Send a fresh heartbeat
+    const freshHb = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${issuedDeviceKey}` },
+      body: {
+        wifiConnected: true,
+        wifiSsid: 'Fresh_Office_Network',
+        wifiRssi: -50,
+        oledState: 'idle',
+      },
+    });
+    expect(freshHb.statusCode).toBe(200);
+
+    // Now status should be online
+    const freshStatusRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/status`,
+      headers: { Authorization: `Bearer ${establishedPairingSessionId}` },
+    });
+    expect(freshStatusRes.statusCode).toBe(200);
+    expect(freshStatusRes.body.data.online).toBe(true);
+    expect(freshStatusRes.body.data.status).toBe('online');
+    expect(freshStatusRes.body.data.wifi.connected).toBe(true);
+    expect(freshStatusRes.body.data.wifi.state).toBe('connected');
+    expect(freshStatusRes.body.data.wifi.connectedSsid).toBe('Fresh_Office_Network');
+  }, 20000);
+
+  // ---------------------------------------------------------------------------
+  // 12. Identity & Recovery Preservation
+  // ---------------------------------------------------------------------------
+  it('Recovery claim-token generation preserves device identity, MAC, and serial number', async () => {
+    const recoveryRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/claim-token`,
+      headers: { Authorization: `Bearer ${issuedDeviceKey}` },
+    });
+    expect(recoveryRes.statusCode).toBe(200);
+    expect(recoveryRes.body.data.claimToken).toBeDefined();
+
+    // Verify durable device record was NOT altered or reset
+    const statusRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/status`,
+      headers: { Authorization: `Bearer ${issuedDeviceKey}` },
+    });
+    expect(statusRes.body.data.device.deviceId).toBe(REAL_DEVICE_ID);
+    expect(statusRes.body.data.device.serialNumber).toBe('NOVA-C3-5C20DC4239FCA9EC');
+    expect(statusRes.body.data.device.hardwareModel).toBe('ESP32-C3 Super Mini');
+    expect(statusRes.body.data.wifi.macAddress).toBe(REAL_MAC);
+  });
 });

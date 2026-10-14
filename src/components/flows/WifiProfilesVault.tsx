@@ -4,7 +4,7 @@ import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { apiClient } from '../../api/client';
-import type { WifiProfile, WifiConnectionResult } from '../../api/types';
+import type { WifiProfile } from '../../api/types';
 import {
   Wifi,
   Plus,
@@ -25,12 +25,16 @@ import {
 export interface WifiProfilesVaultProps {
   deviceId: string;
   authToken?: string;
+  isDeviceOnline?: boolean;
+  activeConnectedSsid?: string | null;
   onProfileChanged?: () => void;
 }
 
 export const WifiProfilesVault: React.FC<WifiProfilesVaultProps> = ({
   deviceId,
   authToken,
+  isDeviceOnline = false,
+  activeConnectedSsid,
   onProfileChanged,
 }) => {
   const [profiles, setProfiles] = useState<WifiProfile[]>([]);
@@ -202,57 +206,68 @@ export const WifiProfilesVault: React.FC<WifiProfilesVaultProps> = ({
     }
   };
 
-  const renderResultBadge = (result: WifiConnectionResult, attemptedAt: string | null, rssi: number | null) => {
-    switch (result) {
-      case 'connected':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <Badge variant="online">Verified Online</Badge>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-              {rssi ? `${rssi} dBm` : 'Connected'}
-              {attemptedAt && ` • ${new Date(attemptedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-            </span>
-          </div>
-        );
-      case 'pending':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <Badge variant="warning">Pending Verification</Badge>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-              Awaiting ESP32 Heartbeat
-            </span>
-          </div>
-        );
-      case 'auth_failed':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <Badge variant="offline">Auth Failed</Badge>
-            <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
-              Check router password
-            </span>
-          </div>
-        );
-      case 'not_found':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <Badge variant="offline">SSID Not Found</Badge>
-            <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
-              2.4GHz range check
-            </span>
-          </div>
-        );
-      case 'timeout':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <Badge variant="offline">Timeout</Badge>
-            <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
-              Router unresponsive
-            </span>
-          </div>
-        );
-      default:
-        return <Badge variant="warning">Pending</Badge>;
+  const renderResultBadge = (profile: WifiProfile) => {
+    const isConnectedByHeartbeat = Boolean(
+      isDeviceOnline &&
+      activeConnectedSsid &&
+      profile.ssid &&
+      activeConnectedSsid.toLowerCase() === profile.ssid.toLowerCase()
+    );
+
+    if (isConnectedByHeartbeat) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+          <Badge variant="online">Connected</Badge>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            {profile.lastRssi ? `${profile.lastRssi} dBm` : 'Active Connection'}
+            {profile.lastAttemptedAt && ` • ${new Date(profile.lastAttemptedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+          </span>
+        </div>
+      );
     }
+
+    if (profile.lastConnectionResult === 'auth_failed') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+          <Badge variant="offline">Auth Failed</Badge>
+          <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
+            Check router password
+          </span>
+        </div>
+      );
+    }
+
+    if (profile.lastConnectionResult === 'not_found') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+          <Badge variant="offline">SSID Not Found</Badge>
+          <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
+            2.4GHz range check
+          </span>
+        </div>
+      );
+    }
+
+    if (profile.lastConnectionResult === 'timeout') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+          <Badge variant="offline">Timeout</Badge>
+          <span style={{ fontSize: '0.72rem', color: '#fca5a5' }}>
+            Router unresponsive
+          </span>
+        </div>
+      );
+    }
+
+    // Default: Saved in vault (never Verified or Connected without authenticated heartbeat)
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+        <Badge variant="cyan">Saved</Badge>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+          Encrypted in Vault
+        </span>
+      </div>
+    );
   };
 
   return (
@@ -451,7 +466,7 @@ export const WifiProfilesVault: React.FC<WifiProfilesVaultProps> = ({
                     )}
                   </div>
 
-                  {renderResultBadge(profile.lastConnectionResult, profile.lastAttemptedAt, profile.lastRssi)}
+                  {renderResultBadge(profile)}
                 </div>
 
                 {/* Profile Details Row */}

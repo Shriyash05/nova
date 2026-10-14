@@ -406,14 +406,75 @@ When called with `Authorization: Bearer <deviceKey>` over TLS, the backend inclu
 }
 ```
 
+### 4.9 GET `/api/v1/devices/:deviceId/wifi-profiles/boot`
+
+Dedicated boot configuration endpoint for ESP32-C3 firmware. Returns **ONLY** the single default profile needed for automatic boot connection over TLS.
+
+**Request Headers**:
+- `Authorization: Bearer <deviceKey>` (Firmware authentication required)
+
+**Firmware Response `200 OK` (when default profile exists)**:
+```json
+{
+  "success": true,
+  "data": {
+    "deviceId": "nova-c3-5c20dc4239fca9ec",
+    "vaultVersion": 4,
+    "hasDefault": true,
+    "defaultProfile": {
+      "id": "prof_a1b2c3d4e5f6",
+      "name": "Home Studio",
+      "voiceSlot": "network one",
+      "slotNumber": 1,
+      "ssid": "Home_Studio_2.4G",
+      "isDefault": true,
+      "version": 1,
+      "password": "cleartext_password_for_hardware_over_tls",
+      "hasPassword": true
+    }
+  }
+}
+```
+
+**Firmware Response `200 OK` (when no default configured)**:
+```json
+{
+  "success": true,
+  "data": {
+    "deviceId": "nova-c3-5c20dc4239fca9ec",
+    "vaultVersion": 4,
+    "hasDefault": false,
+    "defaultProfile": null,
+    "message": "No default boot profile configured for device."
+  }
+}
+```
+
+**Error Responses**:
+- `401 UNAUTHORIZED`: Absent, invalid, or expired deviceKey.
+- `403 FORBIDDEN`: Device key belongs to a different device (`CROSS_DEVICE_FORBIDDEN`).
+- `404 NOT_FOUND`: Device ID does not exist in registry.
+
 ---
 
-## 5. Security & Voice UX Constraints
+## 5. Security, Heartbeat, and Recovery Constraints
 
-1. **Envelope Encryption**: Stored Wi-Fi passwords and Notion OAuth access tokens are encrypted at rest with server-side AES-256-GCM. Decryption keys are managed via KMS-equivalent environment secrets (`NOTION_ENCRYPTION_KEY`).
-2. **Zero Password Leakage**: Passwords submitted by users over HTTPS are write-only. Dashboard responses return `hasPassword: true`, never cleartext passwords.
-3. **Hardware Truth Verification**: Wi-Fi connection states reflect real hardware reports. Until the ESP32-C3 executes a successful handshake and reports via heartbeat or `/wifi-profile-result`, the dashboard reflects `Pending Verification`.
-4. **Voice Slot Stability**: Profiles are mapped to hardware-deterministic voice slots `network one` through `network five`. Voice command syntax is strictly:
-   > *"Hi ESP, connect to network one"*
-   while OLED and web display user-assigned names (e.g., "Home Studio").
-5. **Local Recovery Guarantee**: If all saved profiles fail, NOVA activates a local recovery SoftAP at `192.168.4.1`. All local credentials bypass cloud servers completely.
+1. **Envelope Encryption at Rest**: Stored Wi-Fi passwords and Notion OAuth access tokens are encrypted at rest with server-side AES-256-GCM authenticated encryption (`iv:authTag:ciphertext`). Decryption keys are held in server environment variables (`NOTION_ENCRYPTION_KEY` / `WIFI_ENCRYPTION_KEY`), strictly outside the database.
+2. **Zero Password Leakage**: Passwords submitted by users over HTTPS are write-only. Browser dashboard responses return `hasPassword: true`, never cleartext passwords or hashes. Credentials are never logged in diagnostics, error responses, or test logs.
+3. **Hardware Truth Connection Badging**:
+   - A saved profile in the vault displays the `Saved` badge by default. It must **never** display `Verified Online` or `Connected` simply because it exists in the database.
+   - Connection status is established **only** when an authenticated device heartbeat matching the profile SSID is received within the freshness window.
+4. **Heartbeat Liveness & Stale Telemetry Handling**:
+   - Heartbeats older than **90 seconds** automatically mark `device.status = 'offline'` and `wifi.state = 'disconnected'`.
+   - Stale IP addresses and RSSI values are scrubbed to `null` to prevent misleading "online" false positives in user interfaces.
+5. **Per-Device Credentials & Isolation**:
+   - Each physical NOVA device has its own unique high-entropy bootstrap credential and independent rotatable device key (`dkey_<hex>`).
+   - No shared global device secret exists.
+   - Cross-device requests are strictly rejected with `403 FORBIDDEN`.
+6. **Voice Slot Stability**:
+   - Profiles are mapped to hardware-deterministic voice slots `network one` through `network five`.
+   - Voice switching syntax is: *"Hi ESP, connect to network one"*.
+7. **Identity & Recovery Preservation**:
+   - Changing Wi-Fi profiles or entering recovery mode **never** deletes or resets device identity, account ownership, Notion OAuth authorization, cloud data, sync history, or queued unsent voice memos.
+   - Wi-Fi recovery remains strictly isolated from factory reset.
+
