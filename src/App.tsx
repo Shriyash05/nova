@@ -87,7 +87,7 @@ export const App: React.FC = () => {
 
         {state.step === 'CLAIMING' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'center', paddingTop: '2rem' }}>
-            <NovaDeviceMockup ledState="pulse_cyan" caption="Validating Claim Token with Backend" />
+            <NovaDeviceMockup oledState="pairing_qr" caption="OLED: Validating Claim Token with Backend" />
             <Card glow>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.8rem', padding: '1rem 0' }}>
                 <Loader2 size={28} className="spinner" style={{ animation: 'rotate-spinner 1s linear infinite', color: 'var(--accent-cyan)' }} />
@@ -170,7 +170,7 @@ export const App: React.FC = () => {
 
         {state.step === 'ERROR' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', textAlign: 'center', paddingTop: '1rem' }}>
-            <NovaDeviceMockup ledState="flash_red" caption="Red Flashing • Action Required" />
+            <NovaDeviceMockup oledState="offline" caption="OLED: Router Disconnected • Action Required" />
             
             <Card style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.8rem' }}>

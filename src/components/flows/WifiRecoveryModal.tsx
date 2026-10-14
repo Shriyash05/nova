@@ -3,7 +3,7 @@ import { Card } from '../common/Card';
 import { Button } from '../common/Button';
 import { NovaDeviceMockup } from '../hardware/NovaDeviceMockup';
 import { WifiProvisionScreen } from './WifiProvisionScreen';
-import { CheckCircle2, ArrowLeft, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck, QrCode } from 'lucide-react';
 import type { WifiCredentials, WifiNetwork } from '../../domain/wifi';
 
 export interface WifiRecoveryModalProps {
@@ -42,23 +42,23 @@ export const WifiRecoveryModal: React.FC<WifiRecoveryModalProps> = ({
       {stage === 'instructions' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
           <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '1.45rem', fontWeight: 600 }}>Wi-Fi Reconnection Mode</h2>
+            <h2 style={{ fontSize: '1.45rem', fontWeight: 600 }}>Wi-Fi Reconnection & Recovery</h2>
             <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-              Put your keychain into pairing mode to provide updated Wi-Fi router credentials.
+              Update your Wi-Fi network without unlinking Notion or losing any stored notes.
             </p>
           </div>
 
           <NovaDeviceMockup
             size="md"
-            ledState="breathe_purple"
-            caption="Breathing Purple • Wi-Fi Recovery Mode"
+            oledState="offline"
+            caption="OLED: Displaying Recovery QR Code"
           />
 
-          {/* Step by step hardware trigger guide */}
+          {/* Real hardware recovery procedure */}
           <Card glow>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                How to enter Wi-Fi Setup Mode:
+                How Wi-Fi Recovery Works on NOVA:
               </div>
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
@@ -80,7 +80,7 @@ export const WifiRecoveryModal: React.FC<WifiRecoveryModalProps> = ({
                   1
                 </span>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                  Ensure your NOVA is awake and nearby.
+                  When disconnected from your router, the ESP32-C3 firmware automatically renders a <strong>Wi-Fi Recovery QR Code</strong> on the SSD1306 OLED screen.
                 </div>
               </div>
 
@@ -103,7 +103,7 @@ export const WifiRecoveryModal: React.FC<WifiRecoveryModalProps> = ({
                   2
                 </span>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                  Press and hold the center talk button for <strong>5 seconds</strong> until the light ring pulses amber/purple.
+                  Ensure your NOVA is plugged into USB-C power or awake. The OLED will show the QR matrix.
                 </div>
               </div>
 
@@ -126,7 +126,7 @@ export const WifiRecoveryModal: React.FC<WifiRecoveryModalProps> = ({
                   3
                 </span>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                  Click "LED is Breathing Purple" below to select your new network.
+                  Click <strong>"Enter New Wi-Fi"</strong> below to select your new 2.4GHz network.
                 </div>
               </div>
             </div>
@@ -138,42 +138,26 @@ export const WifiRecoveryModal: React.FC<WifiRecoveryModalProps> = ({
               background: 'rgba(16, 185, 129, 0.08)',
               border: '1px solid rgba(16, 185, 129, 0.25)',
               borderRadius: 'var(--radius-md)',
-              padding: '0.8rem 1rem',
+              padding: '0.85rem 1rem',
               display: 'flex',
-              gap: '0.7rem',
+              gap: '0.75rem',
               alignItems: 'flex-start',
             }}
           >
             <ShieldCheck size={18} color="var(--status-success)" style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div style={{ fontSize: '0.78rem', color: '#a7f3d0', lineHeight: 1.4 }}>
-              <strong>Zero Data Loss Guarantee:</strong> Wi-Fi recovery updates only your network credentials. Device identity, Notion authorization, queued audio notes, and sync history are completely preserved.
-            </div>
-          </div>
-
-          <div
-            style={{
-              background: 'rgba(239, 68, 68, 0.06)',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              borderRadius: 'var(--radius-md)',
-              padding: '0.75rem 1rem',
-              display: 'flex',
-              gap: '0.7rem',
-              alignItems: 'flex-start',
-            }}
-          >
-            <AlertCircle size={16} color="#f87171" style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
-              <strong>Not a Factory Reset:</strong> Factory reset requires holding for 15 seconds until red rapid flashing and wipes cloud account bindings. 5 seconds is safe Wi-Fi recovery only.
+            <div style={{ fontSize: '0.8rem', color: '#a7f3d0', lineHeight: 1.45 }}>
+              <strong style={{ display: 'block', marginBottom: '2px' }}>Zero Data Loss Guarantee:</strong>
+              Reconnecting Wi-Fi updates <em>only</em> router credentials on the ESP32-C3 NVS flash. Your permanent device identity, existing Notion authorization, cloud notes, and queued recordings remain completely preserved.
             </div>
           </div>
 
           <Button
             variant="primary"
             onClick={() => setStage('provisioning')}
-            leftIcon={<CheckCircle2 size={18} />}
+            leftIcon={<QrCode size={18} />}
             rightIcon={<ArrowRight size={18} />}
           >
-            Device is in Wi-Fi Mode
+            Enter New Wi-Fi Credentials
           </Button>
         </div>
       ) : (

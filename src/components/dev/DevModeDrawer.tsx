@@ -164,7 +164,7 @@ export const DevModeDrawer: React.FC<DevModeDrawerProps> = ({
               }}
             >
               <div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>ESP32 Wi-Fi & Cloud Heartbeat</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>ESP32-C3 Wi-Fi & Cloud Heartbeat</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   Simulate router power loss or roaming out of range
                 </div>

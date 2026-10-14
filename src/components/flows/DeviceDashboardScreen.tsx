@@ -5,7 +5,7 @@ import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { NovaDeviceMockup } from '../hardware/NovaDeviceMockup';
 import { SignalStrength } from '../hardware/SignalStrength';
-import { LedRingGuide } from '../hardware/LedRingGuide';
+import { OledDisplayGuide } from '../hardware/OledDisplayGuide';
 import type { DeviceTelemetry } from '../../domain/device';
 import type { WifiStatus } from '../../domain/wifi';
 import type { NotionConnectionInfo, NotionSyncTestResult } from '../../domain/notion';
@@ -15,14 +15,12 @@ import {
   CheckCircle2,
   RefreshCw,
   ExternalLink,
-  Battery,
   AlertTriangle,
   Send,
   Unlink,
   Radio,
   SlidersHorizontal,
-  Trash2,
-  ShieldAlert,
+  Mic,
 } from 'lucide-react';
 
 export interface DeviceDashboardScreenProps {
@@ -46,17 +44,14 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
   onTestSync,
   onDisconnectNotion,
   onReconnectNotion,
-  onFactoryReset,
 }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isTestingSync, setIsTestingSync] = useState(false);
   const [syncTestResult, setSyncTestResult] = useState<NotionSyncTestResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Modals state
   const [isDisconnectModalOpen, setIsDisconnectModalOpen] = useState(false);
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [resetConfirmSerial, setResetConfirmSerial] = useState('');
-  const [isResetting, setIsResetting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   const handleRefresh = async () => {
@@ -67,9 +62,19 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
 
   const handleRunSyncTest = async () => {
     setIsTestingSync(true);
-    const result = await onTestSync();
-    setSyncTestResult(result);
-    setIsTestingSync(false);
+    setSyncError(null);
+    try {
+      const result = await onTestSync();
+      if (result) {
+        setSyncTestResult(result);
+      } else {
+        setSyncError('Sync test did not receive confirmation from backend.');
+      }
+    } catch (err: unknown) {
+      setSyncError(err instanceof Error ? err.message : 'Failed to trigger sync test');
+    } finally {
+      setIsTestingSync(false);
+    }
   };
 
   const handleConfirmDisconnect = async () => {
@@ -77,14 +82,6 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
     await onDisconnectNotion();
     setIsDisconnecting(false);
     setIsDisconnectModalOpen(false);
-  };
-
-  const handleConfirmReset = async () => {
-    if (resetConfirmSerial.trim() !== telemetry.serialNumber) return;
-    setIsResetting(true);
-    await onFactoryReset(resetConfirmSerial.trim());
-    setIsResetting(false);
-    setIsResetModalOpen(false);
   };
 
   const isDeviceOnline = telemetry.status === 'online' && telemetry.cloudMqttConnected;
@@ -95,10 +92,10 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-            NOVA Keychain
+            NOVA Keychain Dashboard
           </h2>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }} className="font-mono">
-            {telemetry.serialNumber} • FW {telemetry.firmwareVersion}
+            {telemetry.serialNumber} • {telemetry.hardwareModel}
           </div>
         </div>
 
@@ -141,7 +138,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
             <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Device Offline</span>
           </div>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4 }}>
-            NOVA is unable to communicate with the cloud backend. Voice memos recorded while offline will stay cached securely on the keychain flash memory and automatically synchronize once reconnected.
+            NOVA is disconnected from the router. The SSD1306 OLED screen is displaying the Recovery QR Code. Audio memos will stay cached on local flash and sync once reconnected.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
             <Button
@@ -156,25 +153,25 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
         </div>
       )}
 
-      {/* Interactive Device Hardware View */}
+      {/* Interactive Device Hardware View with OLED Screen */}
       <NovaDeviceMockup
         size="md"
-        ledState={telemetry.ledState}
+        oledState={telemetry.oledState}
         caption={
           isDeviceOnline
-            ? 'Solid Teal • Standby (Tap center to simulate press)'
-            : 'Flashing Red • Disconnected from Router'
+            ? 'OLED: Standby • Click screen to simulate "Hi ESP"'
+            : 'OLED: Router Disconnected • Recovery QR active'
         }
       />
 
-      {/* Primary Telemetry Grid */}
+      {/* Primary Telemetry Grid: Truthful Hardware & Network States */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
         {/* Wi-Fi Card */}
         <Card style={{ margin: 0, padding: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-cyan)' }}>
               <Wifi size={16} />
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Wi-Fi</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Wi-Fi (2.4GHz)</span>
             </div>
             {wifi.state === 'connected' ? (
               <Badge variant="online">Connected</Badge>
@@ -206,11 +203,11 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
               display: 'block',
             }}
           >
-            Reconnect Wi-Fi →
+            Update Wi-Fi →
           </button>
         </Card>
 
-        {/* Cloud Broker Status Card */}
+        {/* Cloud Connection & Hardware Specs Card */}
         <Card style={{ margin: 0, padding: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-cyan)' }}>
@@ -229,12 +226,12 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-            <Battery size={13} color="var(--text-secondary)" />
-            <span>{telemetry.batteryPercent}% Battery</span>
+            <Mic size={13} color="var(--accent-cyan)" />
+            <span>Wake: "Hi ESP"</span>
           </div>
 
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.6rem' }}>
-            Uptime: {Math.floor(telemetry.uptimeSeconds / 60)}m
+            FW {telemetry.firmwareVersion} • TLS 1.3
           </div>
         </Card>
       </div>
@@ -248,7 +245,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
               <div>
                 <h3 style={{ fontSize: '0.98rem', fontWeight: 600 }}>Notion Synchronization</h3>
                 <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                  OAuth 2.0 Integration Link
+                  Server-Side OAuth 2.0 (Tokens Encrypted in KMS)
                 </span>
               </div>
             </div>
@@ -278,25 +275,25 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>Workspace:</span>
                 <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {notion.workspaceName}
+                  {notion.workspaceName || 'Linked Workspace'}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Destination DB:</span>
+                <span style={{ color: 'var(--text-secondary)' }}>Destination Database:</span>
                 <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>
-                  {notion.targetDatabaseName}
+                  {notion.targetDatabaseName || 'NOVA Voice Inbox'}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Pending Sync Queue:</span>
+                <span style={{ color: 'var(--text-secondary)' }}>Pending Queue Count:</span>
                 <span style={{ fontWeight: 600, color: notion.pendingSyncCount > 0 ? '#fbbf24' : '#34d399' }}>
-                  {notion.pendingSyncCount === 0 ? '0 notes (All caught up)' : `${notion.pendingSyncCount} offline notes`}
+                  {notion.pendingSyncCount === 0 ? '0 pending (Idempotent queue caught up)' : `${notion.pendingSyncCount} offline actions`}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Last Cloud Sync:</span>
+                <span style={{ color: 'var(--text-secondary)' }}>Most Recent Sync:</span>
                 <span style={{ color: 'var(--text-muted)' }}>
-                  {notion.lastSyncAt ? new Date(notion.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                  {notion.lastSyncAt ? new Date(notion.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'None yet'}
                 </span>
               </div>
             </div>
@@ -311,7 +308,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
                 color: '#fca5a5',
               }}
             >
-              Notion authorization is currently revoked or unlinked. Re-authorize to enable voice memo delivery.
+              Notion authorization is currently not linked. Authorize your Notion workspace to enable voice note delivery.
             </div>
           )}
 
@@ -326,7 +323,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
                   isLoading={isTestingSync}
                   leftIcon={<Send size={14} />}
                 >
-                  Test Note Sync
+                  Test Note Sync (Real API)
                 </Button>
                 <Button
                   variant="secondary"
@@ -345,7 +342,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
                 onClick={onReconnectNotion}
                 leftIcon={<ExternalLink size={14} />}
               >
-                Reconnect Notion Workspace
+                Connect Notion Workspace
               </Button>
             )}
           </div>
@@ -372,7 +369,7 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
                     {syncTestResult.pageTitle}
                   </div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>
-                    Delivered in {syncTestResult.latencyMs}ms to {syncTestResult.databaseName}
+                    Created in Notion via POST /api/v1/devices/:id/sync/test
                   </div>
                 </div>
               </div>
@@ -393,67 +390,62 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
               </a>
             </div>
           )}
+
+          {syncError && (
+            <div
+              style={{
+                marginTop: '0.4rem',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.65rem 0.8rem',
+                fontSize: '0.78rem',
+                color: '#fca5a5',
+              }}
+            >
+              Sync Error: {syncError}
+            </div>
+          )}
         </div>
       </Card>
 
-      {/* Advanced Device Settings / Danger Zone */}
+      {/* Hardware Architecture Reference Card */}
       <Card>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)' }}>
             <SlidersHorizontal size={16} />
-            <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>Device Management</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Wi-Fi Network Reconnect
-              </div>
-              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                Safely update router credentials without losing Notion link.
-              </div>
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onStartWifiRecovery}
-              style={{ flexShrink: 0 }}
-            >
-              Change Wi-Fi
-            </Button>
+            <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>Physical Hardware Specifications</span>
           </div>
 
           <div
             style={{
-              borderTop: '1px solid var(--border-subtle)',
-              paddingTop: '0.8rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '0.6rem',
+              fontSize: '0.78rem',
             }}
           >
-            <div>
-              <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#f87171' }}>
-                Factory Reset Device
-              </div>
-              <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                Wipes cloud ownership, unlinks Notion, and clears flash.
-              </div>
+            <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.6rem', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ color: 'var(--text-muted)' }}>Microcontroller</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>ESP32-C3 Super Mini</div>
             </div>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setIsResetModalOpen(true)}
-              leftIcon={<Trash2 size={13} />}
-              style={{ flexShrink: 0 }}
-            >
-              Reset
-            </Button>
+            <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.6rem', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ color: 'var(--text-muted)' }}>Monochrome Display</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>SSD1306 OLED (0x3C)</div>
+            </div>
+            <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.6rem', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ color: 'var(--text-muted)' }}>Microphone Sensor</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>MAX4466 (ADC GPIO1)</div>
+            </div>
+            <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.6rem', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ color: 'var(--text-muted)' }}>Voice Wake Model</div>
+              <div style={{ fontWeight: 600, color: 'var(--accent-cyan)', marginTop: '2px' }}>WakeNet "Hi ESP"</div>
+            </div>
           </div>
         </div>
       </Card>
 
-      <LedRingGuide />
+      <OledDisplayGuide />
 
       {/* Safe Notion Disconnect Confirmation Modal */}
       <Modal
@@ -474,8 +466,8 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
             }}
           >
             <li>Already-synchronized notes in your Notion workspace will <strong>remain safe and untouched</strong>.</li>
-            <li>Voice notes recorded while disconnected will remain queued in offline storage on the keychain.</li>
-            <li>Cloud token KMS keys are permanently revoked and scrubbed.</li>
+            <li>Voice notes recorded while offline remain queued on the ESP32-C3 flash memory.</li>
+            <li>Server-side encrypted access tokens are permanently scrubbed.</li>
           </ul>
 
           <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem' }}>
@@ -489,62 +481,6 @@ export const DeviceDashboardScreen: React.FC<DeviceDashboardScreenProps> = ({
               leftIcon={<Unlink size={16} />}
             >
               Confirm Disconnect
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Factory Reset Modal with Serial Confirmation */}
-      <Modal
-        isOpen={isResetModalOpen}
-        onClose={() => setIsResetModalOpen(false)}
-        title="Factory Reset NOVA"
-        description="This action clears all cloud ownership and firmware bindings."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-          <div
-            style={{
-              background: 'var(--status-error-dim)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: 'var(--radius-md)',
-              padding: '0.75rem',
-              fontSize: '0.8rem',
-              color: '#fca5a5',
-              display: 'flex',
-              gap: '0.5rem',
-            }}
-          >
-            <ShieldAlert size={18} style={{ flexShrink: 0 }} />
-            <div>
-              <strong>Distinction from Wi-Fi Recovery:</strong> If you only moved routers or changed passwords, use Wi-Fi Recovery instead. Factory reset removes account ownership completely.
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="serialResetInput">
-              Type device serial number to confirm: <span className="font-mono">{telemetry.serialNumber}</span>
-            </label>
-            <input
-              id="serialResetInput"
-              type="text"
-              className="form-input font-mono"
-              placeholder={telemetry.serialNumber}
-              value={resetConfirmSerial}
-              onChange={(e) => setResetConfirmSerial(e.target.value.toUpperCase())}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.6rem' }}>
-            <Button variant="secondary" onClick={() => setIsResetModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              disabled={resetConfirmSerial.trim() !== telemetry.serialNumber || isResetting}
-              isLoading={isResetting}
-              onClick={handleConfirmReset}
-            >
-              Wipe & Reset
             </Button>
           </div>
         </div>

@@ -1,155 +1,190 @@
-# NOVA — Voice Assistant Onboarding Platform
+# NOVA — Production Onboarding Portal & Cloud Backend
 
-A modern, mobile-first onboarding platform for **NOVA**, an ESP32-S3-based voice assistant keychain that records spontaneous voice notes and automatically syncs them into Notion.
+A production-ready onboarding portal and serverless cloud backend for **NOVA**, an ESP32-C3-based voice assistant keychain that captures voice notes hands-free via WakeNet and automatically syncs them into Notion.
 
-Built with **React 19**, **TypeScript**, and **Vanilla CSS** featuring a deep navy/dark graphite aesthetic, restrained electric cyan accents, subtle glow, and an interactive hardware mockup with live animated RGB light-ring states.
+Live Deployment: [buynovastore.vercel.app](https://buynovastore.vercel.app/)
 
 ---
 
-## ⚡ Quickstart
+## ⚡ Physical Hardware Architecture
 
-### Prerequisites
-- Node.js >= 20.x
-- npm >= 10.x
+NOVA runs on dedicated embedded hardware:
+- **MCU**: **ESP32-C3 Super Mini** (Single-core 32-bit RISC-V @ 160MHz, 4MB Flash, Wi-Fi 4 802.11b/g/n + BLE 5.0).
+- **Monochrome Display**: **SSD1306 OLED** (0.96", 128x64 pixels, I2C address `0x3C`, connected on `GPIO8` [SDA] and `GPIO9` [SCL]).
+- **Microphone**: **MAX4466 Electret Microphone** with adjustable gain on analog `ADC GPIO1` (16 kHz audio sampling).
+- **Voice Trigger**: **WakeNet offline wake word engine** recognizing **"Hi ESP"**.
+- **No RGB LED ring**, **no speaker**, **no vibration motor**, and **no push-to-talk button**. All interactions are hands-free ("Hi ESP") with visual feedback rendered directly on the SSD1306 monochrome OLED screen.
 
-### Installation & Development
+---
+
+## 🚀 Key Features
+
+1. **Production Serverless Backend (`/api/v1/...`)**:
+   - Deployed on Vercel as native serverless functions (`api/index.ts`).
+   - All API routes return clean, validated, structured JSON responses (no HTML fallback).
+   - Strict input validation, HTTP status codes (`200`, `400`, `401`, `404`, `409`, `410`, `500`), and real error objects.
+
+2. **Secure Ephemeral Pairing**:
+   - The ESP32-C3 firmware renders a single-use claim token on the SSD1306 OLED screen (`clm_live_...`).
+   - Claim tokens expire within **15 minutes** and are invalidated immediately upon first redemption.
+   - Zero credentials or permanent device keys are embedded in QR codes or stored in browser storage.
+   - Successful claim establishes an authenticated pairing session (`sess_...`).
+
+3. **Server-Side Notion OAuth 2.0 Integration**:
+   - Public client ID initiates redirect; token exchange occurs exclusively on the backend (`POST https://api.notion.com/v1/oauth/token`).
+   - Notion access tokens are **encrypted at rest using AES-256-GCM** with a server-side encryption key (`NOTION_ENCRYPTION_KEY`).
+   - Token secrets never touch browser storage or client-side JavaScript.
+
+4. **Idempotent Queue & Action Acknowledgements**:
+   - Every note sync uses an `idempotency_key` stored in the `device_actions` table.
+   - Retries, intermittent Wi-Fi drops, or power cycles will never create duplicate Notion entries.
+
+5. **Safe Wi-Fi Recovery (Non-Destructive)**:
+   - When router Wi-Fi is lost, NOVA automatically renders a **Recovery QR Code** on the OLED screen.
+   - Reconnecting Wi-Fi updates only the network credentials on the ESP32-C3 NVS flash.
+   - Permanent device identity, Notion authorization, and queued audio notes remain **100% intact**.
+
+6. **Development-Only Mock Mode**:
+   - Mock mode is **strictly disabled in production builds** (`import.meta.env.PROD`).
+   - In local development, a floating Hardware Sandbox drawer enables offline simulation, latency adjustments, and fault injection.
+
+---
+
+## 🗄️ Database Schema
+
+The database schema is defined in [`schema.sql`](file:///d:/Personal%20projects/nova/schema.sql) and runs on PostgreSQL, Supabase, or Neon:
+
+```sql
+-- 1. Devices (Durable identity surviving Wi-Fi reconnects & recovery)
+CREATE TABLE IF NOT EXISTS devices (
+    id VARCHAR(64) PRIMARY KEY,
+    serial_number VARCHAR(64) NOT NULL UNIQUE,
+    mac_address VARCHAR(32) NOT NULL,
+    hardware_model VARCHAR(64) NOT NULL DEFAULT 'ESP32-C3 Super Mini',
+    firmware_version VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
+    status VARCHAR(16) NOT NULL DEFAULT 'offline',
+    ip_address VARCHAR(45),
+    wifi_ssid VARCHAR(64),
+    wifi_rssi INTEGER,
+    last_heartbeat TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 2. Claim Tokens (15-minute single-use ephemeral tokens shown on OLED QR)
+CREATE TABLE IF NOT EXISTS claim_tokens (
+    token VARCHAR(128) PRIMARY KEY,
+    device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    short_code VARCHAR(16) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    is_redeemed BOOLEAN NOT NULL DEFAULT FALSE,
+    redeemed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 3. Pairing Sessions
+CREATE TABLE IF NOT EXISTS pairing_sessions (
+    id VARCHAR(128) PRIMARY KEY,
+    device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    claim_token VARCHAR(128),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4. Notion Authorizations (Tokens encrypted with AES-256-GCM)
+CREATE TABLE IF NOT EXISTS notion_authorizations (
+    device_id VARCHAR(64) PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    workspace_id VARCHAR(64),
+    workspace_name VARCHAR(255),
+    workspace_icon VARCHAR(255),
+    bot_id VARCHAR(128),
+    encrypted_access_token TEXT NOT NULL,
+    target_database_id VARCHAR(128),
+    target_database_name VARCHAR(255),
+    owner_email VARCHAR(255),
+    last_sync_at TIMESTAMPTZ,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 5. Device Actions & Idempotent Sync Queue
+CREATE TABLE IF NOT EXISTS device_actions (
+    id VARCHAR(64) PRIMARY KEY,
+    device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    action_type VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+    payload_json JSONB NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    response_json JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    acknowledged_at TIMESTAMPTZ
+);
+```
+
+---
+
+## 🔑 Required Environment Variables
+
+Set these in Vercel **Project Settings → Environment Variables**:
+
+| Variable Name | Required By | Description | Example Value |
+| :--- | :--- | :--- | :--- |
+| `NOTION_CLIENT_ID` | Backend | Notion Public Client ID from Integrations Portal | `132e0123-4567-89ab-cdef...` |
+| `NOTION_CLIENT_SECRET` | Backend | Secret key for exchanging OAuth codes | `secret_abcdef123456...` |
+| `NOTION_REDIRECT_URI` | Backend | OAuth callback endpoint | `https://buynovastore.vercel.app/api/v1/auth/notion/callback` |
+| `NOTION_ENCRYPTION_KEY` | Backend | 32-byte (64 hex chars) key for AES-256-GCM | `openssl rand -hex 32` |
+| `DATABASE_URL` | Backend | PostgreSQL / Supabase pooler connection URL | `postgresql://user:pass@aws-0-ap-south-1.pooler.supabase.com:6543/postgres` |
+| `VITE_API_BASE_URL` | Frontend | Leave blank for relative `/api/v1` calls | `""` |
+| `VITE_MOCK_API` | Frontend | Set to `false` in production | `false` |
+| `VITE_NOTION_CLIENT_ID` | Frontend | Public Client ID for redirect building | `132e0123-4567-89ab-cdef...` |
+
+---
+
+## 🔗 Notion OAuth Configuration
+
+In your [Notion Integrations Portal](https://www.notion.so/profile/integrations):
+1. Create a Public Integration named **NOVA Voice Assistant**.
+2. Under **OAuth Domain & URIs**, add the Redirect URI:
+   - **Production**: `https://buynovastore.vercel.app/api/v1/auth/notion/callback`
+   - **Local Development**: `http://localhost:5173/api/v1/auth/notion/callback`
+3. Under **User Capabilities**, enable:
+   - Read content
+   - Update content
+   - Insert content
+   - Read user information (email)
+
+---
+
+## 💻 Local Development & Testing
+
 ```bash
 # 1. Install dependencies
 npm install
 
-# 2. Run local development server
+# 2. Run dev server (both frontend and local /api serverless functions)
 npm run dev
 
-# 3. Run typecheck & build production bundle
-npm run build
-
-# 4. Run automated test suite
+# 3. Run test suite (Vitest: 21 passing tests across frontend & backend)
 npm run test
 
-# 5. Run linter
+# 4. Run linter (Oxlint: 0 warnings, 0 errors)
 npm run lint
-```
 
-The application runs at `http://localhost:5173`.
-
----
-
-## 📱 User Flows
-
-### A. First-Time Setup
-1. **Welcome**: Introduces the NOVA keychain and guides the user into setup.
-2. **Device Claim**: Camera QR code viewfinder (with fallback to 8-character laser-etched shortcode `NOV-84F3`). Validates single-use claim token.
-3. **Wi-Fi Provisioning**: Communicates with ESP32-S3 using **Web Bluetooth (Web BLE)** on supported browsers, or **Guided SoftAP Hotspot** (`NOVA-Setup-XXXX`) on Mobile Safari. Scans visible 2.4GHz networks and transmits credentials.
-4. **Backend Heartbeat Verification**: Real-time confirmation of local DHCP IP assignment and cloud MQTT TLS 1.3 heartbeat.
-5. **Notion OAuth Authorization**: Explains granular permissions (adding blocks, reading database properties) and what NOVA never accesses (passwords, unrelated pages). Never asks for manual API key pasting.
-6. **Setup Complete & Dashboard**: Confirmation summary, usage tips, and transition to live telemetry dashboard.
-
-### B. Wi-Fi Reconnection & Recovery
-- Accessible directly from the welcome screen or device dashboard.
-- Step-by-step instructions on holding the center button for **5 seconds** until the light ring pulses amber/purple.
-- Preserves device identity, cloud ownership, Notion authorization, unsynced audio buffer, and sync history.
-- **Never re-prompts for Notion authorization** merely because Wi-Fi changed.
-- Clearly distinguishes safe Wi-Fi recovery from destructive Factory Reset (15-second button hold).
-
-### C. Notion Connection Management
-- Live status displaying connected workspace name, target database, and last sync timestamp.
-- **Test Note Sync**: Simulates a live voice memo delivery, animates the hardware LED flash, and provides a direct link to the newly generated Notion page.
-- Deliberate "Reconnect Notion" action only if authorization is revoked or expired.
-- Safe disconnect action with an interactive confirmation modal detailing data retention guarantees.
-
-### D. Device Status & Telemetry
-- Real-time Wi-Fi status (SSID, RSSI dBm signal bars, MAC address, frequency band).
-- Cloud MQTT connection health (ping latency, uptime, firmware version).
-- Battery level & charging state.
-- Pending synchronization count (e.g. 0 notes pending or queued offline notes).
-- Offline diagnostic banner with troubleshooting recommendations when disconnected.
-
----
-
-## 🔐 Security Architecture
-
-- **No Permanent Secrets in Browser**: Neither device flash encryption keys nor permanent Notion tokens are stored in browser storage (`localStorage` / `sessionStorage`).
-- **Single-Use Ephemeral Claims**: QR codes contain short-lived claim tokens (15-minute lifespan). They do not store Wi-Fi credentials or permanent device tokens.
-- **Backend Authority**: Device ownership and Notion OAuth exchange (`code` -> `access_token`) occur exclusively on the backend and are encrypted in KMS.
-- **Realistic Provisioning**: Acknowledges browser sandbox limitations. Uses Web Bluetooth GATT service (`00000001-6e6f-7661-7769-6669-70726f760000`) where supported, with guided SoftAP hotspot fallback for iOS Safari.
-
----
-
-## 🛠️ Architecture & Project Structure
-
-```
-nova/
-├── public/                  # Static assets & favicon
-├── src/
-│   ├── api/
-│   │   ├── client.ts        # Typed API client with configurable base URL
-│   │   ├── endpoints.ts     # Endpoint contract metadata & readiness status
-│   │   ├── mockApi.ts       # In-memory hardware store & mock API implementation
-│   │   └── types.ts         # Request/response interfaces & domain errors
-│   ├── domain/
-│   │   ├── device.ts        # Telemetry, claim models, LED ring patterns
-│   │   ├── notion.ts        # Notion connection info, scopes, sync test
-│   │   ├── wifi.ts          # Network models, security types, signal calculation
-│   │   └── stateMachine.ts  # Onboarding state machine types & transitions
-│   ├── hooks/
-│   │   ├── useOnboarding.ts # Core state machine hook & action handlers
-│   │   └── useWebBle.ts     # Web Bluetooth support detector & connection hook
-│   ├── components/
-│   │   ├── common/          # Reusable Button, Card, Badge, Header, Modal
-│   │   ├── hardware/        # NovaDeviceMockup, LedRingGuide, SignalStrength
-│   │   ├── flows/           # Welcome, QRScanner, WifiProvision, Verification,
-│   │   │                    # NotionAuth, SetupComplete, Dashboard, Recovery
-│   │   └── dev/             # DevModeDrawer (hardware sandbox & API inspector)
-│   ├── styles/
-│   │   ├── variables.css    # Design tokens, color palette, glassmorphism
-│   │   ├── global.css       # Mobile Safari reset, typography, animations
-│   │   └── components.css   # Component styles
-│   ├── __tests__/           # Vitest unit test suite (state machine & API client)
-│   ├── App.tsx              # Main application orchestrator
-│   └── main.tsx             # Application entry point
-├── API_CONTRACT.md          # REST API & hardware provisioning specification
-├── vercel.json              # Vercel deployment & SPA routing rewrites
-├── .env.example             # Environment variable documentation
-└── package.json
+# 5. Build production bundle
+npm run build
 ```
 
 ---
 
-## 🌐 Environment Variables
+## 📋 Summary of Frontend Changes for ESP32-C3 OLED Hardware
 
-| Variable | Description | Default |
+| Component | Previous Mock Implementation | Updated Real Hardware Implementation |
 | :--- | :--- | :--- |
-| `VITE_API_BASE_URL` | Base URL of the NOVA Cloud Backend | `""` (Relative/Mock) |
-| `VITE_MOCK_API` | Set to `"false"` to communicate with real backend | `"true"` |
-| `VITE_NOTION_CLIENT_ID`| Public Notion OAuth Client ID | `nova_iot_client_9918` |
-| `VITE_BLE_SERVICE_UUID` | ESP32 Bluetooth GATT Provisioning Service UUID | `00000001-6e6f-7661-7769-6669-70726f760000` |
-
----
-
-## 🚀 Deployment on Vercel
-
-The project includes `vercel.json` configured for SPA routing and asset caching:
-
-1. Import the repository in [Vercel](https://vercel.com).
-2. Framework Preset: **Vite**.
-3. Build Command: `npm run build`.
-4. Output Directory: `dist`.
-5. Set environment variable `VITE_MOCK_API=false` when deploying alongside a real backend.
-
----
-
-## 📊 Integration Readiness Report
-
-> [!NOTE]
-> As per IoT engineering best practices, end-to-end hardware functionality should not be claimed until verified against physical production hardware and active backend servers.
-
-| Feature Area | Status | Notes |
-| :--- | :--- | :--- |
-| **Onboarding State Machine** | ✅ **Implemented** | 100% test coverage; supports setup, recovery, Notion auth, and error states |
-| **Mobile-First UI & Design System** | ✅ **Implemented** | Dark graphite foundation, electric cyan accents, safe-area insets, interactive SVG/CSS hardware mockup |
-| **Development & Hardware Sandbox** | ✅ **Implemented** | Slide-out drawer with offline toggles, latency sliders, fault injection, and mock resets |
-| **Web Bluetooth Wi-Fi Handshake** | 🔄 **Mocked / Browser-Ready** | Web BLE API client implemented with UUIDs; requires pairing with physical ESP32 firmware running Protocomm |
-| **Guided SoftAP Wi-Fi Mode** | 🔄 **Mocked / Documented** | Guided instructions and fallback gateway endpoints ready for iOS Safari; requires ESP32 AP firmware |
-| **Backend API Endpoints** | 🚧 **In Progress (Backend)** | Endpoints defined in `API_CONTRACT.md`; mocked in frontend via `mockApi.ts` |
-| **Cloud Notion OAuth KMS Token Store**| 🚧 **In Progress (Backend)** | Frontend OAuth URL and callback handlers implemented; requires live Notion integration client secret in KMS |
-| **Physical ESP32 Microphone Recording**| 🚧 **Pending Hardware Verification**| Tested with synthetic voice note ping; requires bench testing with physical NOVA hardware |
+| **Microcontroller Identity** | Referenced ESP32-S3 WROOM | Aligned to **ESP32-C3 Super Mini** (RISC-V 160MHz, 4MB Flash) |
+| **Hardware Visual Mockup** | Rendered round talk button & circular RGB LED ring | Rendered **ESP32-C3 module + SSD1306 monochrome OLED screen (0x3C)** and MAX4466 microphone capsule |
+| **Recording Trigger** | Claimed "Press and hold center button" | Aligned to **WakeNet offline wake word ("Hi ESP")** with 10-second listening window |
+| **OLED Status Animations** | Pulsing cyan, solid teal, flashing red LED | Monochrome blue/white pixel states: `idle`, `wake_word` ("Hi ESP"), `listening` (waveform), `pairing_qr`, `wifi_setup`, `synced`, `offline` |
+| **Hardware Reference Guide** | `LedRingGuide.tsx` (explaining LED colors) | Replaced with `OledDisplayGuide.tsx` explaining SSD1306 OLED screen states |
+| **Wi-Fi Recovery Flow** | Instructed "Hold button for 5 seconds" | Aligned to **OLED Recovery QR Code** automatically displayed when disconnected from router |
+| **Device Dashboard** | Displayed fake RGB LED status | Displays truthful states: Paired, Wi-Fi SSID/RSSI, Cloud MQTT latency, Notion sync status, pending queue count |
+| **API Integration** | Returned HTML fallback on `/api/v1/...` | Replaced with live serverless JSON backend (`api/index.ts`) and idempotent note creation |

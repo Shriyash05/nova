@@ -225,113 +225,328 @@
   position: relative;
 }
 
-.device-enclosure {
-  width: 170px;
-  height: 230px;
-  background: linear-gradient(145deg, #1e2638 0%, #111726 100%);
-  border-radius: 36px;
-  border: 1.5px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+/* ESP32-C3 Super Mini Hardware Enclosure */
+.c3-device-enclosure {
+  width: 190px;
+  height: 250px;
+  background: linear-gradient(145deg, #182030 0%, #0d121c 100%);
+  border-radius: 28px;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   display: flex;
   flex-direction: column;
   align-items: center;
   position: relative;
-  padding-top: 24px;
+  padding: 14px 16px;
+  box-sizing: border-box;
 }
 
 /* Keychain Loop */
 .keychain-loop {
   position: absolute;
-  top: -26px;
-  width: 44px;
-  height: 38px;
+  top: -24px;
+  width: 42px;
+  height: 34px;
   border-radius: 50% 50% 20% 20%;
-  border: 5px solid #2f3a52;
+  border: 4.5px solid #2f3a52;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.4);
   z-index: 1;
 }
 
-/* Microphone Hole Grid */
-.mic-array {
+/* MAX4466 Microphone Capsule Header */
+.mic-module-header {
   display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  padding: 3px 9px;
 }
 
-.mic-hole {
-  width: 6px;
-  height: 6px;
+.mic-gold-port {
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: #090c14;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-
-/* Push-to-talk button */
-.talk-button {
-  width: 76px;
-  height: 76px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #131a29 0%, #0d121c 100%);
+  background: radial-gradient(circle, #f59e0b 30%, #78350f 100%);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.7), 0 4px 10px rgba(0, 0, 0, 0.4);
 }
 
-/* Interactive LED Ring */
-.led-ring {
-  position: absolute;
-  inset: -6px;
+.mic-core {
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  border: 3px solid transparent;
-  transition: all 400ms ease;
-  pointer-events: none;
+  background: #000;
 }
 
-.led-ring.pulse_cyan {
-  border-color: #00f2fe;
-  box-shadow: 0 0 20px #00f2fe, inset 0 0 10px #00f2fe;
-  animation: pulse-ring 2s infinite ease-out;
-}
-
-.led-ring.pulse_amber {
-  border-color: #f59e0b;
-  box-shadow: 0 0 20px #f59e0b, inset 0 0 10px #f59e0b;
-  animation: pulse-amber 1.8s infinite ease-out;
-}
-
-.led-ring.solid_teal {
-  border-color: #10b981;
-  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
-}
-
-.led-ring.flash_cyan {
-  border-color: #00f2fe;
-  box-shadow: 0 0 24px #00f2fe;
-  animation: breathe-cyan 0.7s infinite alternate ease-in-out;
-}
-
-.led-ring.flash_red {
-  border-color: #ef4444;
-  box-shadow: 0 0 20px #ef4444;
-  animation: pulse-ring 1.2s infinite ease-out;
-}
-
-.led-ring.breathe_purple {
-  border-color: #a855f7;
-  box-shadow: 0 0 22px #a855f7;
-  animation: breathe-cyan 1.6s infinite alternate ease-in-out;
-}
-
-.device-label {
-  margin-top: 28px;
-  font-size: 0.75rem;
+.mic-label {
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
   text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+/* SSD1306 Monochrome OLED Bezel (0.96", 128x64 pixels, I2C 0x3C) */
+.oled-display-bezel {
+  width: 154px;
+  height: 110px;
+  background: #020408;
+  border-radius: 12px;
+  border: 2px solid #202b3d;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.9), 0 4px 14px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  transition: transform 120ms ease;
+}
+
+.oled-display-bezel:active {
+  transform: scale(0.98);
+}
+
+.oled-screen-glass {
+  width: 100%;
+  height: 100%;
+  background: #050a12;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 16px rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.2);
+}
+
+.oled-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-bottom: 1px dotted rgba(0, 242, 254, 0.25);
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: #00f2fe;
+}
+
+.oled-bar-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.oled-canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 4px;
+}
+
+/* OLED State Renderers */
+.oled-idle-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.oled-eye {
+  width: 6px;
+  height: 6px;
+  background: #00f2fe;
+  box-shadow: 0 0 6px #00f2fe;
+  border-radius: 50%;
+  display: inline-block;
+  margin: 0 6px;
+}
+
+.oled-mouth {
+  color: #00f2fe;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.oled-caption {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: rgba(0, 242, 254, 0.8);
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+}
+
+.oled-wake-anim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.oled-wave-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+}
+
+.wave-bar {
+  width: 4px;
+  background: #00f2fe;
+  box-shadow: 0 0 8px #00f2fe;
+  border-radius: 2px;
+  animation: wavePulse 0.8s infinite alternate ease-in-out;
+}
+
+.wave-bar.b1 { height: 8px; animation-delay: 0.1s; }
+.wave-bar.b2 { height: 18px; animation-delay: 0.3s; }
+.wave-bar.b3 { height: 26px; animation-delay: 0s; }
+.wave-bar.b4 { height: 16px; animation-delay: 0.2s; }
+.wave-bar.b5 { height: 10px; animation-delay: 0.4s; }
+
+.oled-wake-text {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #00f2fe;
+  letter-spacing: 0.06em;
+}
+
+.oled-listening-anim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.oled-rec-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: #fca5a5;
+}
+
+.rec-dot {
+  width: 5px;
+  height: 5px;
+  background: #ef4444;
+  border-radius: 50%;
+  animation: pulse-ring 1s infinite;
+}
+
+.oled-oscilloscope {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+
+.osc-line {
+  width: 3px;
+  height: 6px;
+  background: #00f2fe;
+  border-radius: 1px;
+}
+
+.osc-line.tall {
+  height: 16px;
+}
+
+.oled-qr-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.oled-qr-subtext {
+  font-size: 0.58rem;
+  font-family: var(--font-mono);
+  color: #00f2fe;
+  letter-spacing: 0.08em;
+}
+
+.oled-wifi-setup, .oled-synced-view, .oled-offline-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.oled-connecting-text, .oled-synced-text, .oled-offline-text {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.oled-connecting-text { color: #00f2fe; }
+.oled-synced-text { color: #10b981; }
+.oled-offline-text { color: #f59e0b; }
+
+/* Scanlines overlay on OLED */
+.oled-scanlines {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+  background-size: 100% 3px;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* Hardware Specs Footer */
+.c3-hardware-specs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.c3-chip-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.c3-i2c-addr {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* USB-C Port at bottom */
+.usbc-port {
+  position: absolute;
+  bottom: -6px;
+  width: 32px;
+  height: 8px;
+  background: #0a0d14;
+  border: 1.5px solid #2f3a52;
+  border-radius: 4px;
+}
+
+@keyframes wavePulse {
+  0% { transform: scaleY(0.4); }
+  100% { transform: scaleY(1.3); }
 }
 
 /* LED Indicator Explanation Pill */

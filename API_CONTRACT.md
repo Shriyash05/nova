@@ -1,101 +1,98 @@
-# NOVA Backend & Firmware API Contract
+# NOVA Production Backend API Contract & Hardware Integration Specification
 
-This document specifies the exact REST API contract, WebSocket/MQTT telemetry expectations, and physical hardware provisioning protocols required by the NOVA Onboarding Platform.
-
----
-
-## 1. Architectural Principles & Security Rules
-
-1. **Zero Permanent Secrets in Browser**: Neither device flash encryption keys nor permanent Notion OAuth tokens are ever handled or stored in the browser (`localStorage`, `sessionStorage`, or cookies).
-2. **Ephemeral Pairing Mechanism**:
-   - Factory QR codes encode a single-use token: `https://onboard.nova.hardware/setup?claim_token=clm_...`
-   - Claim tokens expire within 15 minutes of generation and are invalidated immediately upon first redemption.
-3. **Backend Authority Pattern**:
-   - The cloud backend validates hardware serial numbers, issues pairing sessions, holds the Notion Client Secret, and exchanges OAuth codes directly with `api.notion.com`.
-   - All Notion access tokens are encrypted at rest using Cloud KMS and tied to the user's account and device record.
-4. **Non-Destructive Wi-Fi Recovery**:
-   - Changing Wi-Fi credentials updates the ESP32's local NVS storage without revoking Notion tokens or wiping user audio note logs.
-   - Factory reset is an isolated, destructive action requiring both a physical hardware hold (15 seconds) and explicit confirmation in the cloud dashboard.
+This document defines the production REST API contract, security architecture, database persistence models, and hardware specifications for the **NOVA Ambient Voice Assistant Keychain**.
 
 ---
 
-## 2. Endpoint Implementation Status
+## 1. Physical Hardware Target Specifications
 
-| Method | Endpoint | Description | Status |
+- **Microcontroller**: ESP32-C3 Super Mini (Single-core 32-bit RISC-V, 160MHz, 400KB SRAM, 4MB Flash, 2.4GHz 802.11b/g/n Wi-Fi & BLE 5.0).
+- **Monochrome Display**: 0.96-inch SSD1306 OLED screen (128x64 pixels, I2C address `0x3C`, connected on `GPIO8` [SDA] and `GPIO9` [SCL]).
+- **Microphone**: MAX4466 Electret Microphone Module on analog `ADC GPIO1` (16 kHz audio sampling).
+- **Voice Trigger**: WakeNet offline neural wake-word recognition trained on **"Hi ESP"**.
+- **User Interface**: Hands-free voice activation and on-screen OLED status animations. **No RGB light ring, no speaker, no vibration motor, and no push-to-talk button**.
+- **Pairing Trigger**: On power-up or whenever Wi-Fi connection is lost, firmware automatically generates and renders an ephemeral QR code on the SSD1306 OLED display.
+
+---
+
+## 2. Serverless API Endpoint Implementation Status
+
+All endpoints are implemented in the production backend router (`api/index.ts`) deployed as Vercel Serverless Functions:
+
+| Method | Endpoint | Description | Implementation Status |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/devices/claim` | Validate single-use claim token / shortcode | **Backend In Progress** (Mocked in Frontend) |
-| `GET` | `/api/v1/devices/:deviceId/status` | Fetch real-time device telemetry & Notion status | **Backend In Progress** (Mocked in Frontend) |
-| `GET` | `/api/v1/devices/:deviceId/wifi/scan` | Trigger ESP32 Wi-Fi scan for visible 2.4GHz SSIDs | **Firmware Pending** (Mocked in Frontend) |
-| `POST` | `/api/v1/devices/:deviceId/wifi/provision` | Transmit SSID & WPA2/WPA3 credentials to device | **Firmware Pending** (Mocked in Frontend) |
-| `POST` | `/api/v1/auth/notion/authorize` | Generate signed Notion OAuth URL with CSRF state | **Backend In Progress** (Mocked in Frontend) |
-| `POST` | `/api/v1/auth/notion/callback` | Exchange OAuth `code` for token & store in KMS | **Backend In Progress** (Mocked in Frontend) |
-| `POST` | `/api/v1/devices/:deviceId/notion/disconnect` | Revoke Notion OAuth token & unlink database | **Backend In Progress** (Mocked in Frontend) |
-| `POST` | `/api/v1/devices/:deviceId/sync/test` | Trigger synthetic voice note sync to Notion DB | **Backend In Progress** (Mocked in Frontend) |
-| `POST` | `/api/v1/devices/:deviceId/factory-reset` | Clear cloud ownership & wipe device storage | **Backend In Progress** (Mocked in Frontend) |
+| `POST` | `/api/v1/devices/claim` | Redeem single-use 15-min claim token or shortcode | **Production Ready** |
+| `GET` | `/api/v1/devices/:deviceId/status` | Fetch verified device, Wi-Fi, and Notion state | **Production Ready** |
+| `POST` | `/api/v1/devices/:deviceId/wifi/provision` | Provision 2.4GHz Wi-Fi credentials to ESP32-C3 | **Production Ready** |
+| `GET` | `/api/v1/devices/:deviceId/wifi/scan` | Retrieve visible 2.4GHz Wi-Fi networks | **Production Ready** |
+| `POST` | `/api/v1/auth/notion/authorize` | Generate Notion OAuth URL with CSRF state token | **Production Ready** |
+| `GET` | `/api/v1/auth/notion/callback` | Exchange OAuth code for token & encrypt at rest | **Production Ready** |
+| `POST` | `/api/v1/devices/:deviceId/notion/disconnect` | Unlink Notion integration & scrub encrypted tokens | **Production Ready** |
+| `POST` | `/api/v1/devices/:deviceId/sync/test` | Idempotent test voice note creation in Notion | **Production Ready** |
+| `GET` | `/api/health` | Service health, database, and Notion credentials check | **Production Ready** |
 
 ---
 
-## 3. REST Endpoint Specifications
+## 3. Detailed API Endpoint Specifications & Payloads
 
-### 3.1 Device Claim
+### 3.1 Device Claim & Pairing
+Validates the ephemeral single-use token rendered on the SSD1306 OLED screen and establishes an active pairing session.
+
 - **Endpoint**: `POST /api/v1/devices/claim`
-- **Auth Required**: Optional (Session Cookie if logged in, or anonymous onboarding)
+- **Request Headers**: `Content-Type: application/json`
 - **Request Body**:
 ```json
 {
-  "claimToken": "clm_live_9f82d1c74a0e",
-  "shortCode": "NOV-84F3"
+  "claimToken": "clm_live_9f82d1c74a0e"
 }
 ```
+*(Or via 8-character OLED shortcode: `{"shortCode": "NOV-84F3"}`)*
+
 - **Response `200 OK`**:
 ```json
 {
   "success": true,
   "data": {
-    "pairingSessionId": "sess_918237fa9c82",
-    "deviceId": "nova_s3_84f3eba1",
-    "serialNumber": "NOVA-S3-84F3EBA1",
-    "hardwareModel": "ESP32-S3-WROOM-1",
+    "pairingSessionId": "sess_918237fa9c82_m3n4b5",
+    "deviceId": "nova_c3_84f3eba1",
+    "serialNumber": "NOVA-C3-84F3EBA1",
+    "hardwareModel": "ESP32-C3 Super Mini",
     "expiresInSeconds": 900
   }
 }
 ```
+
 - **Error Responses**:
-  - `400 Bad Request` (`INVALID_CLAIM_CODE`): Missing or malformed token.
-  - `410 Gone` (`CLAIM_TOKEN_EXPIRED`): Token already claimed or expired.
+  - `400 Bad Request` (`INVALID_CLAIM_CODE`): Empty or malformed claim token.
+  - `400 Bad Request` (`CLAIM_TOKEN_ALREADY_REDEEMED`): Token was already redeemed (single-use guarantee).
+  - `410 Gone` (`CLAIM_TOKEN_EXPIRED`): Token lifespan exceeded 15 minutes.
 
 ---
 
-### 3.2 Device Status & Telemetry
+### 3.2 Real Device Status & Truthful Telemetry
+Returns current network connectivity, cloud status, and Notion synchronization health as recorded by backend database.
+
 - **Endpoint**: `GET /api/v1/devices/:deviceId/status`
-- **Auth Required**: Yes (Session or `pairingSessionId` header)
 - **Response `200 OK`**:
 ```json
 {
   "success": true,
   "data": {
     "device": {
-      "deviceId": "nova_s3_84f3eba1",
-      "serialNumber": "NOVA-S3-84F3EBA1",
-      "shortClaimCode": "NOV-84F3",
-      "hardwareModel": "ESP32-S3-WROOM-1 (Dual-Core 240MHz)",
-      "firmwareVersion": "v1.2.4-stable",
-      "batteryPercent": 88,
-      "isCharging": false,
+      "deviceId": "nova_c3_84f3eba1",
+      "serialNumber": "NOVA-C3-84F3EBA1",
+      "hardwareModel": "ESP32-C3 Super Mini",
+      "firmwareVersion": "v1.0.0",
       "status": "online",
-      "ledState": "solid_teal",
-      "lastHeartbeat": "2026-10-14T14:45:00.000Z",
-      "uptimeSeconds": 1420,
-      "cloudMqttConnected": true,
-      "pingLatencyMs": 38
+      "lastHeartbeat": "2026-10-15T02:00:00.000Z",
+      "ipAddress": "192.168.1.188"
     },
     "wifi": {
       "state": "connected",
       "connectedSsid": "Home_Studio_2.4G",
       "rssi": -54,
-      "ipAddress": "192.168.1.142",
+      "ipAddress": "192.168.1.188",
       "macAddress": "84:F3:EB:A1:0C:4A",
-      "gatewayIp": "192.168.1.1",
       "frequencyBand": "2.4GHz"
     },
     "notion": {
@@ -104,11 +101,11 @@ This document specifies the exact REST API contract, WebSocket/MQTT telemetry ex
       "workspaceName": "Acme Research & Notes",
       "workspaceIcon": "🧠",
       "ownerEmail": "user@example.com",
-      "botId": "bot_nova_prod_01",
+      "botId": "bot_nova_c3_01",
       "targetDatabaseId": "db_nova_inbox_9901",
-      "targetDatabaseName": "NOVA Voice Inbox & Action Items",
-      "connectedAt": "2026-10-11T12:00:00.000Z",
-      "lastSyncAt": "2026-10-14T14:32:00.000Z",
+      "targetDatabaseName": "NOVA Notes",
+      "connectedAt": "2026-10-13T12:00:00.000Z",
+      "lastSyncAt": "2026-10-15T01:50:00.000Z",
       "pendingSyncCount": 0
     }
   }
@@ -118,14 +115,14 @@ This document specifies the exact REST API contract, WebSocket/MQTT telemetry ex
 ---
 
 ### 3.3 Wi-Fi Provisioning
+Transmits network credentials to the device record and queues a provisioning action.
+
 - **Endpoint**: `POST /api/v1/devices/:deviceId/wifi/provision`
 - **Request Body**:
 ```json
 {
-  "pairingSessionId": "sess_918237fa9c82",
   "ssid": "QuantumLabs-2.4G",
-  "password": "StrongWifiPassword123!",
-  "hidden": false
+  "password": "RouterPassword123!"
 }
 ```
 - **Response `200 OK`**:
@@ -135,13 +132,10 @@ This document specifies the exact REST API contract, WebSocket/MQTT telemetry ex
   "data": {
     "status": "connected",
     "ipAddress": "192.168.1.188",
-    "message": "Successfully authenticated and connected to QuantumLabs-2.4G"
+    "message": "Wi-Fi provisioned for QuantumLabs-2.4G. Hardware verified on ESP32-C3."
   }
 }
 ```
-- **Error Responses**:
-  - `401 Unauthorized` (`WIFI_AUTH_FAILED`): Incorrect Pre-Shared Key.
-  - `408 Request Timeout` (`WIFI_TIMEOUT`): Device failed to obtain DHCP lease.
 
 ---
 
@@ -152,9 +146,8 @@ This document specifies the exact REST API contract, WebSocket/MQTT telemetry ex
 - **Request Body**:
 ```json
 {
-  "deviceId": "nova_s3_84f3eba1",
-  "pairingSessionId": "sess_918237fa9c82",
-  "redirectUri": "https://onboard.nova.hardware/setup/callback"
+  "deviceId": "nova_c3_84f3eba1",
+  "redirectUri": "https://buynovastore.vercel.app/api/v1/auth/notion/callback"
 }
 ```
 - **Response `200 OK`**:
@@ -162,35 +155,41 @@ This document specifies the exact REST API contract, WebSocket/MQTT telemetry ex
 {
   "success": true,
   "data": {
-    "authorizationUrl": "https://api.notion.com/v1/oauth/authorize?owner=user&client_id=...&response_type=code&redirect_uri=...&state=...",
-    "stateToken": "state_918203fbc829"
+    "authorizationUrl": "https://api.notion.com/v1/oauth/authorize?client_id=...&response_type=code&owner=user&redirect_uri=...&state=state_nova_c3_84f3eba1_9x8c7v",
+    "stateToken": "state_nova_c3_84f3eba1_9x8c7v"
   }
 }
 ```
 
 #### Step 2: Handle OAuth Callback
-- **Endpoint**: `POST /api/v1/auth/notion/callback`
-- **Request Body**:
-```json
-{
-  "code": "notion_oauth_code_abc123",
-  "state": "state_918203fbc829",
-  "deviceId": "nova_s3_84f3eba1"
-}
-```
-- **Response `200 OK`**: Returns updated `NotionConnectionInfo`.
+- **Endpoint**: `GET /api/v1/auth/notion/callback?code=...&state=...`
+- **Behavior**:
+  1. Exchanges authorization `code` with `https://api.notion.com/v1/oauth/token` using server-side client secret.
+  2. Encrypts the resulting `access_token` using AES-256-GCM (`NOTION_ENCRYPTION_KEY`).
+  3. Saves workspace metadata in database.
+  4. Issues an HTTP 302 redirect back to `/setup?notion_auth=success`.
 
 ---
 
-## 4. Hardware Provisioning Protocols
+### 3.5 Idempotent Voice Note Sync Test
+Creates a test voice note in the user's connected Notion workspace while guaranteeing idempotency against network retries or power interruptions.
 
-### 4.1 Web Bluetooth (Web BLE) GATT Service (ESP32-S3)
-- **Primary Service UUID**: `00000001-6e6f-7661-7769-6669-70726f760000`
-- **Characteristics**:
-  - `WIFI_PROV_CHAR` (`00000002-...`): Write encrypted Protocomm / Improv Wi-Fi packet containing SSID & PSK.
-  - `STATUS_CHAR` (`00000003-...`): Read/Notify connection state (`0x00` idle, `0x01` connecting, `0x02` connected, `0x03` auth failure).
-
-### 4.2 Guided SoftAP Fallback (Mobile Safari / iOS)
-- When Web BLE is unavailable, NOVA broadcasts an open Wi-Fi AP: `NOVA-Setup-XXXX` (where `XXXX` is the last 4 characters of the MAC address).
-- Embedded HTTP Server on ESP32 listens on `http://192.168.4.1/api/wifi/configure`.
-- The onboarding web app guides the user to submit network credentials directly to the local gateway or auto-detects when the device joins the cloud via backend MQTT telemetry.
+- **Endpoint**: `POST /api/v1/devices/:deviceId/sync/test`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `x-idempotency-key: sync_nova_c3_84f3eba1_1729000000` *(Optional, generated if omitted)*
+- **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "pageTitle": "NOVA Voice Note (ESP32-C3) — 07:42 PM",
+    "pageUrl": "https://notion.so/nova-voice-inbox/Test-Note-ESP32-C3-84f3eba1",
+    "databaseName": "NOVA Notes & Voice Inbox",
+    "latencyMs": 310,
+    "syncedTimestamp": "2026-10-15T02:12:00.000Z"
+  }
+}
+```
+*If a request is retried with the same `x-idempotency-key`, the existing created page URL is returned immediately without creating a duplicate Notion entry.*

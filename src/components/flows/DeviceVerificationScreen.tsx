@@ -34,7 +34,7 @@ export const DeviceVerificationScreen: React.FC<DeviceVerificationScreenProps> =
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', textAlign: 'center' }}>
       <div>
         <h2 style={{ fontSize: '1.45rem', fontWeight: 600 }}>
-          {isComplete ? 'NOVA is Online!' : 'Verifying Cloud Connection'}
+          {isComplete ? 'NOVA ESP32-C3 is Online!' : 'Verifying Cloud Connection'}
         </h2>
         <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
           Backend is confirming real-time MQTT heartbeat telemetry with your keychain.
@@ -42,8 +42,8 @@ export const DeviceVerificationScreen: React.FC<DeviceVerificationScreenProps> =
       </div>
 
       <NovaDeviceMockup
-        ledState={isComplete ? 'solid_teal' : 'pulse_amber'}
-        caption={isComplete ? 'Solid Teal • Verified Online' : 'Pulsing Amber • Handshake in Progress'}
+        oledState={isComplete ? 'synced' : 'wifi_setup'}
+        caption={isComplete ? 'OLED: Verified Online • WakeNet Ready' : 'OLED: Connecting to Cloud MQTT...'}
       />
 
       <Card glow={isComplete}>
@@ -60,7 +60,7 @@ export const DeviceVerificationScreen: React.FC<DeviceVerificationScreenProps> =
                 Wi-Fi Association Established
               </div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                SSID: {wifi?.connectedSsid || 'Home_Studio_2.4G'} • RSSI: {wifi?.rssi || -56} dBm
+                SSID: {wifi?.connectedSsid || 'Home_Studio_2.4G'} • RSSI: {wifi?.rssi || -54} dBm
               </div>
             </div>
           </div>

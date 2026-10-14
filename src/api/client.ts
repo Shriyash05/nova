@@ -20,12 +20,22 @@ export class NovaApiClient {
 
   constructor() {
     this.baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-    // Default to mock mode in dev/preview unless explicitly disabled
-    const mockEnv = import.meta.env.VITE_MOCK_API;
-    this.useMock = mockEnv === undefined || mockEnv === 'true' || mockEnv === '';
+    
+    // In production builds, mock mode is strictly disabled and CANNOT run!
+    if (import.meta.env.PROD) {
+      this.useMock = false;
+    } else {
+      // In development, defaults to real backend unless VITE_MOCK_API=true is set
+      this.useMock = import.meta.env.VITE_MOCK_API === 'true';
+    }
   }
 
   public setMockMode(enabled: boolean) {
+    if (import.meta.env.PROD) {
+      console.warn('Mock mode cannot be enabled in a production build.');
+      this.useMock = false;
+      return;
+    }
     this.useMock = enabled;
   }
 
@@ -62,7 +72,7 @@ export class NovaApiClient {
           success: false,
           error: {
             code: data?.error?.code || `HTTP_${response.status}`,
-            message: data?.error?.message || response.statusText || 'Network request failed',
+            message: data?.error?.message || response.statusText || 'API request failed',
             details: data?.error?.details,
           },
         };
@@ -84,7 +94,7 @@ export class NovaApiClient {
     }
   }
 
-  // API Methods
+  // Real REST API Methods calling /api/v1/...
   public async claimDevice(payload: ClaimDevicePayload): Promise<ApiResponse<ClaimDeviceResult>> {
     if (this.useMock) {
       return mockApi.claimDevice(payload);
@@ -160,6 +170,9 @@ export class NovaApiClient {
     }
     return this.request<NotionSyncTestResult>(`/api/v1/devices/${encodeURIComponent(deviceId)}/sync/test`, {
       method: 'POST',
+      headers: {
+        'x-idempotency-key': `sync_${deviceId}_${Date.now()}`,
+      },
     });
   }
 

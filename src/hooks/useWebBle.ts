@@ -33,7 +33,7 @@ export function useWebBle(mockMode = true): UseWebBleResult {
       await new Promise((resolve) => setTimeout(resolve, 800));
       setIsConnecting(false);
       setIsConnected(true);
-      setDeviceName('NOVA Keychain [S3-84F3]');
+      setDeviceName('NOVA Keychain [C3-84F3]');
       return true;
     }
 

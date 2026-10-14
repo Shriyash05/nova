@@ -4,7 +4,7 @@ import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
 import { SignalStrength } from '../hardware/SignalStrength';
 import { NovaDeviceMockup } from '../hardware/NovaDeviceMockup';
-import { LedRingGuide } from '../hardware/LedRingGuide';
+import { OledDisplayGuide } from '../hardware/OledDisplayGuide';
 import type { WifiNetwork, WifiCredentials } from '../../domain/wifi';
 import { Wifi, Bluetooth, Radio, Lock, RefreshCw, Eye, EyeOff, AlertTriangle, ArrowRight } from 'lucide-react';
 
@@ -115,11 +115,11 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
         </p>
       </div>
 
-      {/* Mini Device visual showing Wi-Fi provisioning state */}
+      {/* Mini Device visual showing OLED screen state */}
       <NovaDeviceMockup
         size="sm"
-        ledState={isRecovery ? 'breathe_purple' : 'pulse_amber'}
-        caption={isRecovery ? 'Breathing Purple • Wi-Fi Recovery' : 'Pulsing Amber • Wi-Fi Setup Mode'}
+        oledState={isRecovery ? 'offline' : 'wifi_setup'}
+        caption={isRecovery ? 'OLED: Recovery Mode • Awaiting New Wi-Fi' : 'OLED: Wi-Fi Setup • Connecting...'}
       />
 
       {/* Provisioning Channel Selector (Web BLE vs SoftAP) */}
@@ -148,7 +148,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
             >
               <Bluetooth size={18} color={method === 'web_ble' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
               <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Web Bluetooth
+                Web Bluetooth (BLE)
               </span>
               <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                 Desktop / Android Chrome
@@ -192,11 +192,11 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
                 lineHeight: 1.4,
               }}
             >
-              <strong>iPhone / Mobile Safari:</strong> Connect your phone to Wi-Fi hotspot{' '}
+              <strong>iPhone / Mobile Safari:</strong> Connect your phone Wi-Fi to hotspot{' '}
               <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>
                 NOVA-Setup-84F3
               </span>
-              . The browser relays credentials without installing an iOS app!
+              . The browser relays credentials without requiring an iOS app!
             </div>
           )}
         </div>
@@ -319,7 +319,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
               </button>
             </div>
             <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
-              Credentials are sent directly to your device and never stored by our cloud servers.
+              Credentials are sent directly to your ESP32-C3 device and never stored by our cloud servers.
             </span>
           </div>
 
@@ -338,7 +338,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
             }}
           >
             <AlertTriangle size={15} style={{ flexShrink: 0 }} />
-            <span>ESP32-S3 voice hardware requires a 2.4GHz Wi-Fi band (5GHz-only bands are not supported).</span>
+            <span>ESP32-C3 Super Mini requires a 2.4GHz Wi-Fi band (5GHz-only bands are not supported).</span>
           </div>
 
           <Button
@@ -353,7 +353,7 @@ export const WifiProvisionScreen: React.FC<WifiProvisionScreenProps> = ({
         </form>
       </Card>
 
-      <LedRingGuide />
+      <OledDisplayGuide />
     </div>
   );
 };

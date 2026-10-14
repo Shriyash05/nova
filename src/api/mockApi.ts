@@ -24,37 +24,40 @@ export interface MockConfig {
 }
 
 const defaultMockConfig: MockConfig = {
-  latencyMs: 600,
+  latencyMs: 400,
   forceError: false,
   deviceStartsOffline: false,
   notionStartsRevoked: false,
 };
 
-// In-memory mock device state
+// In-memory mock device state for development sandbox only
 class MockBackendStore {
   private config: MockConfig = { ...defaultMockConfig };
   
   private telemetry: DeviceTelemetry = {
-    deviceId: 'nova_s3_84f3eba1',
-    serialNumber: 'NOVA-S3-84F3EBA1',
+    deviceId: 'nova_c3_84f3eba1',
+    serialNumber: 'NOVA-C3-84F3EBA1',
     shortClaimCode: 'NOV-84F3',
-    hardwareModel: 'ESP32-S3-WROOM-1 (Dual-Core 240MHz)',
-    firmwareVersion: 'v1.2.4-stable',
-    batteryPercent: 88,
+    hardwareModel: 'ESP32-C3 Super Mini (RISC-V 160MHz)',
+    firmwareVersion: 'v1.0.0-stable',
+    batteryPercent: 94,
     isCharging: false,
     status: 'online',
-    ledState: 'solid_teal',
+    oledState: 'idle',
     lastHeartbeat: new Date().toISOString(),
-    uptimeSeconds: 1420,
+    uptimeSeconds: 1200,
     cloudMqttConnected: true,
     pingLatencyMs: 38,
+    wakeWordEnabled: true,
+    microphoneInput: 'MAX4466 (ADC GPIO1, 16 kHz)',
+    displayDriver: 'SSD1306 (I2C 0x3C, GPIO8/GPIO9)',
   };
 
   private wifi: WifiStatus = {
     state: 'connected',
     connectedSsid: 'Home_Studio_2.4G',
     rssi: -54,
-    ipAddress: '192.168.1.142',
+    ipAddress: '192.168.1.188',
     macAddress: '84:F3:EB:A1:0C:4A',
     gatewayIp: '192.168.1.1',
     frequencyBand: '2.4GHz',
@@ -66,19 +69,18 @@ class MockBackendStore {
     workspaceName: 'Acme Research & Notes',
     workspaceIcon: '🧠',
     ownerEmail: 'user@example.com',
-    botId: 'bot_nova_prod_01',
+    botId: 'bot_nova_c3_01',
     targetDatabaseId: 'db_nova_inbox_9901',
     targetDatabaseName: 'NOVA Voice Inbox & Action Items',
-    connectedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    lastSyncAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
+    connectedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    lastSyncAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
     pendingSyncCount: 0,
   };
 
   private availableWifiNetworks: WifiNetwork[] = [
-    { ssid: 'Home_Studio_2.4G', rssi: -52, security: 'wpa2_personal', channel: 6 },
-    { ssid: 'IoT_Secure_2G', rssi: -65, security: 'wpa3_personal', channel: 11 },
-    { ssid: 'Neighbour_Extender', rssi: -82, security: 'wpa2_personal', channel: 1 },
-    { ssid: 'CoffeeShop_Free_Guest', rssi: -74, security: 'open', channel: 6 },
+    { ssid: 'Home_Studio_2.4G', rssi: -54, security: 'wpa2_personal', channel: 6 },
+    { ssid: 'Quantum_Mesh_IoT', rssi: -62, security: 'wpa3_personal', channel: 1 },
+    { ssid: 'Studio_Guest_WiFi', rssi: -78, security: 'open', channel: 11 },
   ];
 
   public getConfig(): MockConfig {
@@ -90,13 +92,13 @@ class MockBackendStore {
     if (this.config.deviceStartsOffline) {
       this.telemetry.status = 'offline';
       this.telemetry.cloudMqttConnected = false;
-      this.telemetry.ledState = 'flash_red';
+      this.telemetry.oledState = 'offline';
       this.wifi.state = 'idle';
       this.wifi.connectedSsid = null;
     } else {
       this.telemetry.status = 'online';
       this.telemetry.cloudMqttConnected = true;
-      this.telemetry.ledState = 'solid_teal';
+      this.telemetry.oledState = 'idle';
       this.wifi.state = 'connected';
       this.wifi.connectedSsid = this.wifi.connectedSsid || 'Home_Studio_2.4G';
     }
@@ -132,7 +134,7 @@ class MockBackendStore {
 
   public resetToFactory() {
     this.telemetry.status = 'offline';
-    this.telemetry.ledState = 'pulse_cyan';
+    this.telemetry.oledState = 'pairing_qr';
     this.telemetry.cloudMqttConnected = false;
     this.wifi = {
       state: 'idle',
@@ -180,36 +182,34 @@ export const mockApi = {
         success: false,
         error: {
           code: 'INVALID_CLAIM_CODE',
-          message: 'Please provide a valid QR claim token or 8-character device shortcode.',
+          message: 'Please provide a valid QR claim token or shortcode shown on your OLED.',
         },
       };
     }
 
-    // Check if user entered bad mock code
     const cleanToken = token.trim().toUpperCase();
     if (cleanToken === 'ERROR-TEST' || cleanToken === 'INVALID') {
       return {
         success: false,
         error: {
           code: 'CLAIM_TOKEN_EXPIRED',
-          message: 'This device claim token has already been redeemed or has expired.',
+          message: 'This device claim token has already been redeemed or has expired (15-min lifespan).',
         },
       };
     }
 
-    // Set LED state to pairing mode
     mockBackendStore.setTelemetry({
       status: 'provisioning',
-      ledState: 'pulse_amber',
+      oledState: 'wifi_setup',
     });
 
     return {
       success: true,
       data: {
         pairingSessionId: `sess_${Math.random().toString(36).substring(2, 12)}`,
-        deviceId: 'nova_s3_84f3eba1',
-        serialNumber: 'NOVA-S3-84F3EBA1',
-        hardwareModel: 'ESP32-S3-WROOM-1',
+        deviceId: 'nova_c3_84f3eba1',
+        serialNumber: 'NOVA-C3-84F3EBA1',
+        hardwareModel: 'ESP32-C3 Super Mini',
         expiresInSeconds: 900,
       },
     };
@@ -263,7 +263,6 @@ export const mockApi = {
       };
     }
 
-    // Simulate incorrect password if test password is "wrong"
     if (payload.password === 'wrong') {
       mockBackendStore.setWifi({
         state: 'failed_auth',
@@ -278,11 +277,10 @@ export const mockApi = {
       };
     }
 
-    // Successful provisioning updates mock store
     mockBackendStore.setWifi({
       state: 'connected',
       connectedSsid: payload.ssid,
-      rssi: -56,
+      rssi: -54,
       ipAddress: '192.168.1.188',
       gatewayIp: '192.168.1.1',
       frequencyBand: '2.4GHz',
@@ -292,7 +290,7 @@ export const mockApi = {
     mockBackendStore.setTelemetry({
       status: 'online',
       cloudMqttConnected: true,
-      ledState: 'solid_teal',
+      oledState: 'idle',
     });
 
     return {
@@ -309,8 +307,7 @@ export const mockApi = {
     await mockBackendStore.delay();
 
     const stateToken = `state_${Math.random().toString(36).substring(2, 15)}`;
-    // Realistic Notion OAuth redirect URL
-    const notionAuthUrl = `https://api.notion.com/v1/oauth/authorize?owner=user&client_id=nova_iot_client_9918&response_type=code&redirect_uri=${encodeURIComponent(
+    const notionAuthUrl = `https://api.notion.com/v1/oauth/authorize?owner=user&client_id=nova_iot_c3_client&response_type=code&redirect_uri=${encodeURIComponent(
       payload.redirectUri
     )}&state=${stateToken}`;
 
@@ -342,7 +339,7 @@ export const mockApi = {
       workspaceName: 'Acme Research & Notes',
       workspaceIcon: '🧠',
       ownerEmail: 'user@example.com',
-      botId: 'bot_nova_prod_01',
+      botId: 'bot_nova_c3_01',
       targetDatabaseId: 'db_nova_inbox_9901',
       targetDatabaseName: 'NOVA Voice Inbox & Action Items',
       connectedAt: new Date().toISOString(),
@@ -395,16 +392,15 @@ export const mockApi = {
       };
     }
 
-    // Set LED to flashing cyan while syncing
     mockBackendStore.setTelemetry({
       status: 'syncing',
-      ledState: 'flash_cyan',
+      oledState: 'synced',
     });
 
     setTimeout(() => {
       mockBackendStore.setTelemetry({
         status: 'online',
-        ledState: 'solid_teal',
+        oledState: 'idle',
       });
       mockBackendStore.setNotion({
         lastSyncAt: new Date().toISOString(),
@@ -416,10 +412,10 @@ export const mockApi = {
       success: true,
       data: {
         success: true,
-        pageTitle: `NOVA Setup Test Note — ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        pageUrl: 'https://notion.so/nova-voice-inbox/Test-Note-ESP32-Heartbeat-84f3eba1',
+        pageTitle: `NOVA Voice Note (ESP32-C3) — ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        pageUrl: 'https://notion.so/nova-voice-inbox/Test-Note-ESP32-C3-Heartbeat-84f3eba1',
         databaseName: notion.targetDatabaseName || 'NOVA Voice Inbox',
-        latencyMs: 312,
+        latencyMs: 290,
         syncedTimestamp: new Date().toISOString(),
       },
     };

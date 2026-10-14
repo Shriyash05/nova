@@ -46,8 +46,8 @@ export const SetupCompleteScreen: React.FC<SetupCompleteScreenProps> = ({
       </div>
 
       <NovaDeviceMockup
-        ledState="solid_teal"
-        caption="Solid Teal • Ready to capture voice notes"
+        oledState="idle"
+        caption='OLED: Standby • Say "Hi ESP" to record'
       />
 
       <Card glow>
@@ -66,9 +66,25 @@ export const SetupCompleteScreen: React.FC<SetupCompleteScreenProps> = ({
               borderBottom: '1px solid var(--border-subtle)',
             }}
           >
+            <span style={{ color: 'var(--text-secondary)' }}>Hardware Platform:</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+              ESP32-C3 Super Mini (OLED 0x3C)
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '0.82rem',
+              padding: '0.5rem 0',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
             <span style={{ color: 'var(--text-secondary)' }}>Wi-Fi Network:</span>
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {wifi?.connectedSsid || 'Home_Studio_2.4G'}
+              {wifi?.connectedSsid || 'Connected (2.4GHz)'}
             </span>
           </div>
 
@@ -84,7 +100,7 @@ export const SetupCompleteScreen: React.FC<SetupCompleteScreenProps> = ({
           >
             <span style={{ color: 'var(--text-secondary)' }}>Notion Workspace:</span>
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {notion?.workspaceName || 'Acme Research & Notes'}
+              {notion?.workspaceName || 'Linked Notion Workspace'}
             </span>
           </div>
 
@@ -105,7 +121,7 @@ export const SetupCompleteScreen: React.FC<SetupCompleteScreenProps> = ({
         </div>
       </Card>
 
-      {/* Hardware Usage Tip */}
+      {/* Voice Wake-Word Usage Tip */}
       <div
         style={{
           background: 'var(--bg-surface-elevated)',
@@ -120,7 +136,7 @@ export const SetupCompleteScreen: React.FC<SetupCompleteScreenProps> = ({
       >
         <Mic size={18} color="var(--accent-cyan)" style={{ marginTop: '2px', flexShrink: 0 }} />
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-          <strong style={{ color: 'var(--text-primary)' }}>How to record:</strong> Press and hold the center button on your keychain. Speak clearly. When you release, the LED will flash cyan while transcribing and creating your Notion page.
+          <strong style={{ color: 'var(--text-primary)' }}>Hands-Free Voice Capture:</strong> Say <strong style={{ color: 'var(--accent-cyan)' }}>"Hi ESP"</strong> clearly near your keychain. The SSD1306 OLED screen will display an active waveform while recording for 10 seconds through the MAX4466 microphone, and sync straight to Notion.
         </div>
       </div>
 
