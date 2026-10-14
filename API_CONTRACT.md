@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS devices (
     hardware_model VARCHAR(64) NOT NULL DEFAULT 'ESP32-C3 Super Mini',
     firmware_version VARCHAR(32) NOT NULL DEFAULT 'v1.0.0-c3',
     status VARCHAR(16) NOT NULL DEFAULT 'offline',          -- 'online' | 'offline'
-    device_secret VARCHAR(128),                             -- Rotatable device key for firmware heartbeat auth
+    device_secret VARCHAR(128),                             -- SHA-256 cryptographic hash of device bearer key (never plaintext)
     bootstrap_hash VARCHAR(128),                            -- SHA-256 hash of unique device bootstrap credential
     ip_address VARCHAR(45),
     wifi_connected BOOLEAN NOT NULL DEFAULT FALSE,

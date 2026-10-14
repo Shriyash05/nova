@@ -153,6 +153,79 @@ function decryptSecret(payload: string): string {
   return decrypted;
 }
 
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
+
+// -----------------------------------------------------------------------------
+// In-Memory Rate Limiting
+// -----------------------------------------------------------------------------
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+const rateLimitMap = new Map<string, RateLimitBucket>();
+
+function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const bucket = rateLimitMap.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= maxRequests) {
+    return false;
+  }
+  bucket.count++;
+  return true;
+}
+
+function getClientIp(req: IncomingMessage): string {
+  const xForwardedFor = req.headers['x-forwarded-for'];
+  if (typeof xForwardedFor === 'string') {
+    return xForwardedFor.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || '127.0.0.1';
+}
+
+// -----------------------------------------------------------------------------
+// Notion OAuth Signed State (Anti-CSRF)
+// -----------------------------------------------------------------------------
+function generateSignedOAuthState(deviceId: string): string {
+  const secret = process.env.SESSION_SECRET || 'nova_oauth_hmac_secret_key_2026';
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const payload = `${deviceId}_${timestamp}_${nonce}`;
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex').substring(0, 32);
+  return `state_${payload}_${sig}`;
+}
+
+function verifySignedOAuthState(state: string): { valid: boolean; deviceId?: string; error?: string } {
+  if (!state || !state.startsWith('state_')) {
+    return { valid: false, error: 'Malformed OAuth state parameter.' };
+  }
+  const rest = state.substring(6);
+  const parts = rest.split('_');
+  if (parts.length < 4) {
+    return { valid: false, error: 'Invalid OAuth state token structure.' };
+  }
+  const deviceId = parts[0];
+  const timestampStr = parts[1];
+  const nonce = parts[2];
+  const sig = parts[3];
+  const timestamp = parseInt(timestampStr, 10);
+  if (isNaN(timestamp) || Date.now() - timestamp > 15 * 60 * 1000) {
+    return { valid: false, error: 'OAuth authorization state has expired (15-minute lifespan).' };
+  }
+  const secret = process.env.SESSION_SECRET || 'nova_oauth_hmac_secret_key_2026';
+  const payload = `${deviceId}_${timestampStr}_${nonce}`;
+  const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('hex').substring(0, 32);
+  if (sig.length !== expectedSig.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+    return { valid: false, error: 'Cryptographic state validation failure. Potential CSRF attempt detected.' };
+  }
+  return { valid: true, deviceId };
+}
+
 // -----------------------------------------------------------------------------
 // Database Operations (Strict Postgres in Production)
 // -----------------------------------------------------------------------------
@@ -280,10 +353,11 @@ async function authenticateDeviceRequest(
     };
   }
 
-  // 1. Check if token matches a device_secret (firmware credential)
+  // 1. Check if token matches a hashed device_secret (firmware credential)
+  const tokenHash = hashToken(token);
   const deviceBySecret = await queryDb<{ id: string }>(
     'SELECT id FROM devices WHERE device_secret = $1',
-    [token]
+    [tokenHash]
   );
   if (deviceBySecret.length > 0) {
     const credDeviceId = deviceBySecret[0].id;
@@ -336,8 +410,27 @@ async function authenticateDeviceRequest(
 // Main Serverless Handler
 // -----------------------------------------------------------------------------
 export default async function handler(req: ExtendedRequest, res: ServerResponse) {
-  // CORS configuration
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS configuration with narrow origin authorization
+  const origin = req.headers.origin;
+  const ALLOWED_ORIGINS = [
+    'https://buynovastore.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+  ];
+  if (origin) {
+    const isAllowed = ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.vercel.app');
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', 'https://buynovastore.vercel.app');
+    }
+  } else {
+    // Non-browser / firmware request (no Origin header)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-idempotency-key, If-None-Match');
   res.setHeader('Access-Control-Expose-Headers', 'ETag');
@@ -404,6 +497,17 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Never uses a shared secret; issues rotatable deviceKey and single-use 15m claim token.
     // =========================================================================
     if (pathname === '/api/v1/devices/bootstrap' && method === 'POST') {
+      if (!checkRateLimit(`bootstrap:${getClientIp(req)}`, 20, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Too many bootstrap requests. Please slow down.',
+          },
+        });
+        return;
+      }
+
       const bootstrapCredential =
         (req.body?.bootstrapCredential as string) ||
         (req.body?.bootstrapSecret as string) ||
@@ -469,6 +573,16 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           });
           return;
         }
+        if (credRows[0].is_used) {
+          sendJson(res, 409, {
+            success: false,
+            error: {
+              code: 'BOOTSTRAP_ALREADY_USED',
+              message: 'This device bootstrap credential has already been redeemed. Single-use enrollment guarantee enforced.',
+            },
+          });
+          return;
+        }
         // Mark used
         await queryDb('UPDATE device_bootstrap_credentials SET is_used = TRUE, used_at = NOW() WHERE device_id = $1', [deviceId]);
       } else {
@@ -497,14 +611,11 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const ipAddress = (req.body?.ipAddress as string) || null;
       const rssi = typeof req.body?.rssi === 'number' ? req.body.rssi : null;
 
-      // Check if device already has a persistent device_secret, otherwise generate one
-      const existingDevice = await queryDb<{ device_secret: string | null }>(
-        'SELECT device_secret FROM devices WHERE id = $1',
-        [deviceId]
-      );
-      const deviceKey = existingDevice[0]?.device_secret || `dkey_${crypto.randomBytes(16).toString('hex')}`;
+      // Generate a high-entropy 192-bit device bearer token and store its SHA-256 hash
+      const rawDeviceKey = `dkey_${crypto.randomBytes(24).toString('hex')}`;
+      const deviceKeyHash = hashToken(rawDeviceKey);
 
-      // Upsert device in PostgreSQL
+      // Upsert device in PostgreSQL (stores SHA-256 hash, never raw key)
       const upsertDeviceSql = `
         INSERT INTO devices (
           id, serial_number, mac_address, hardware_model, firmware_version,
@@ -520,7 +631,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           mac_address = EXCLUDED.mac_address,
           firmware_version = EXCLUDED.firmware_version,
           status = 'online',
-          device_secret = COALESCE(devices.device_secret, EXCLUDED.device_secret),
+          device_secret = EXCLUDED.device_secret,
           bootstrap_hash = EXCLUDED.bootstrap_hash,
           ip_address = COALESCE(EXCLUDED.ip_address, devices.ip_address),
           wifi_connected = TRUE,
@@ -536,7 +647,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         serialNumber,
         macAddress,
         firmwareVersion,
-        deviceKey,
+        deviceKeyHash,
         presentedHash,
         ipAddress,
         wifiSsid,
@@ -569,7 +680,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           shortCode,
           expiresAt,
           expiresInSeconds: 900,
-          deviceKey: devices[0]?.device_secret || deviceKey,
+          deviceKey: rawDeviceKey,
           portalUrl: `https://buynovastore.vercel.app/?token=${token}`,
         },
       });
@@ -582,6 +693,17 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // =========================================================================
     const rotateKeyMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/device-key\/rotate$/);
     if (rotateKeyMatch && method === 'POST') {
+      if (!checkRateLimit(`rotate:${getClientIp(req)}`, 20, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Too many rotation requests. Please wait before retrying.',
+          },
+        });
+        return;
+      }
+
       const targetDeviceId = decodeURIComponent(rotateKeyMatch[1]);
       const auth = await authenticateDeviceRequest(req, targetDeviceId);
       if (!auth.authorized) {
@@ -589,8 +711,10 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const newDeviceKey = `dkey_${crypto.randomBytes(16).toString('hex')}`;
-      await queryDb('UPDATE devices SET device_secret = $1, updated_at = NOW() WHERE id = $2', [newDeviceKey, targetDeviceId]);
+      // Generate high-entropy replacement token and store SHA-256 hash at rest
+      const newDeviceKey = `dkey_${crypto.randomBytes(24).toString('hex')}`;
+      const newKeyHash = hashToken(newDeviceKey);
+      await queryDb('UPDATE devices SET device_secret = $1, updated_at = NOW() WHERE id = $2', [newKeyHash, targetDeviceId]);
 
       sendJson(res, 200, {
         success: true,
@@ -742,6 +866,17 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Validates 15-minute ephemeral token and grants durable pairing session
     // =========================================================================
     if (pathname === '/api/v1/devices/claim' && method === 'POST') {
+      if (!checkRateLimit(`claim:${getClientIp(req)}`, 20, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Too many claim attempts. Please wait a moment before trying again.',
+          },
+        });
+        return;
+      }
+
       const claimToken = (req.body?.claimToken as string) || (req.body?.shortCode as string);
       if (!claimToken || typeof claimToken !== 'string' || !claimToken.trim()) {
         sendJson(res, 400, {
@@ -1658,7 +1793,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const stateToken = `state_${deviceId}_${crypto.randomBytes(8).toString('hex')}`;
+      const stateToken = generateSignedOAuthState(deviceId);
       const params = new URLSearchParams({
         client_id: clientId,
         response_type: 'code',
@@ -1708,16 +1843,19 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const stateParts = state.split('_');
-      const deviceId = (req.body?.deviceId as string) || (stateParts.length >= 2 ? stateParts[1] : null);
-
-      if (!deviceId) {
-        sendJson(res, 400, {
-          success: false,
-          error: { code: 'INVALID_STATE', message: 'Missing target deviceId in OAuth state.' },
-        });
+      const verifiedState = verifySignedOAuthState(state);
+      if (!verifiedState.valid || !verifiedState.deviceId) {
+        const errorMsg = verifiedState.error || 'Invalid or expired OAuth state parameter.';
+        if (method === 'POST') {
+          sendJson(res, 400, { success: false, error: { code: 'INVALID_STATE', message: errorMsg } });
+          return;
+        }
+        res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(errorMsg)}` });
+        res.end();
         return;
       }
+
+      const deviceId = verifiedState.deviceId;
 
       const clientId = process.env.NOTION_CLIENT_ID;
       const clientSecret = process.env.NOTION_CLIENT_SECRET;
@@ -2028,13 +2166,15 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       },
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Internal Server Error';
-    console.error(`[API ERROR] ${method} ${pathname}:`, errorMsg);
+    const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+    const rawError = err instanceof Error ? err.message : 'Internal Server Error';
+    console.error(`[API ERROR] ${method} ${pathname}:`, rawError);
+    const safeMsg = isProd ? 'Internal server error. Please try again later.' : rawError;
     sendJson(res, 500, {
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message: errorMsg,
+        message: safeMsg,
       },
     });
   }

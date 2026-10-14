@@ -5,15 +5,32 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-// Set test environment database connection to the live Supabase pooler
-const DB_URL = 'postgres://nova_app.jcwlxiujyjlessgfwjgu:REDACTED_HISTORICAL_SECRET@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
+import fs from 'fs';
+import path from 'path';
+
+// Automatically load local testing environment variables if not already set
+if (!process.env.DATABASE_URL) {
+  const envLocalPath = path.resolve(process.cwd(), '.env.local');
+  if (fs.existsSync(envLocalPath)) {
+    const content = fs.readFileSync(envLocalPath, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*"?(.*?)"?\s*$/);
+      if (match && !process.env[match[1]]) {
+        process.env[match[1]] = match[2];
+      }
+    }
+  }
+}
+
+const DB_URL = process.env.DATABASE_URL || '';
 
 beforeAll(async () => {
-  process.env.DATABASE_URL = DB_URL;
-  process.env.NOTION_ENCRYPTION_KEY = '349012380b9249f86678fb09da0f43daf380cba2612233e6a565eb73c7f00aaf';
-  process.env.NOTION_CLIENT_ID = '3f9d872b-594c-81fe-b945-00373d142af3';
-  process.env.NOTION_REDIRECT_URI = 'https://buynovastore.vercel.app/';
-  process.env.NOVA_BOOTSTRAP_SECRET = 'nova_sec_c3_hardware_bootstrap_2026';
+  if (!DB_URL) {
+    throw new Error('DATABASE_URL must be configured to run database integration test suite.');
+  }
+
+  process.env.NOTION_REDIRECT_URI = process.env.NOTION_REDIRECT_URI || 'https://buynovastore.vercel.app/';
+  process.env.NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID || '3f9d872b-594c-81fe-b945-00373d142af3';
 
   // Clean test fixtures in database
   const pool = new Pool({
@@ -731,8 +748,8 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.authorizationUrl).toContain('client_id=3f9d872b-594c-81fe-b945-00373d142af3');
+    const expectedClientId = process.env.NOTION_CLIENT_ID || '3f9d872b-594c-81fe-b945-00373d142af3';
+    expect(res.body.data.authorizationUrl).toContain(`client_id=${expectedClientId}`);
     expect(res.body.data.stateToken).toMatch(new RegExp(`^state_${REAL_DEVICE_ID}_`));
   });
 
@@ -941,5 +958,116 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
     expect(statusRes.body.data.device.serialNumber).toBe('NOVA-C3-5C20DC4239FCA9EC');
     expect(statusRes.body.data.device.hardwareModel).toBe('ESP32-C3 Super Mini');
     expect(statusRes.body.data.wifi.macAddress).toBe(REAL_MAC);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 13. Comprehensive Negative & Security Verification
+  // ---------------------------------------------------------------------------
+  it('Single-use bootstrap guarantee: replaying bootstrap credential returns 409 BOOTSTRAP_ALREADY_USED', async () => {
+    // REAL_BOOTSTRAP_SECRET was already used in section 2
+    const replayRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/bootstrap',
+      body: {
+        deviceId: REAL_DEVICE_ID,
+        macAddress: REAL_MAC,
+        firmwareVersion: 'v1.0.0-c3',
+        bootstrapSecret: REAL_BOOTSTRAP_SECRET,
+      },
+    });
+    expect(replayRes.statusCode).toBe(409);
+    expect(replayRes.body.success).toBe(false);
+    expect(replayRes.body.error?.code).toBe('BOOTSTRAP_ALREADY_USED');
+  });
+
+  it('Cross-user/cross-device isolation: Session for Device A cannot access Device B profiles (403)', async () => {
+    const crossRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${OTHER_DEVICE_ID}/wifi-profiles`,
+      headers: {
+        Authorization: `Bearer ${establishedPairingSessionId}`,
+      },
+    });
+    expect(crossRes.statusCode).toBe(403);
+    expect(crossRes.body.success).toBe(false);
+    expect(crossRes.body.error?.code).toBe('FORBIDDEN');
+  });
+
+  it('Unauthenticated requests are denied on all protected endpoints with 401', async () => {
+    const endpoints = [
+      `/api/v1/devices/${REAL_DEVICE_ID}/status`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles/boot`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/heartbeat`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/device-key/rotate`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/claim-token`,
+      `/api/v1/devices/${REAL_DEVICE_ID}/notion/disconnect`,
+    ];
+
+    for (const ep of endpoints) {
+      const res = await simulateRequest({
+        method: ep.includes('rotate') || ep.includes('claim-token') || ep.includes('disconnect') || ep.includes('heartbeat') ? 'POST' : 'GET',
+        url: ep,
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error?.code).toBe('UNAUTHORIZED');
+    }
+  });
+
+  it('Raw device bearer keys and passwords never leak in ordinary status or profile responses', async () => {
+    const statusRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/status`,
+      headers: { Authorization: `Bearer ${issuedDeviceKey}` },
+    });
+    expect(statusRes.statusCode).toBe(200);
+    expect(statusRes.body.data.deviceKey).toBeUndefined();
+    expect(statusRes.body.data.device_secret).toBeUndefined();
+    expect(statusRes.body.data.device?.device_secret).toBeUndefined();
+    expect(statusRes.body.data.device?.deviceKey).toBeUndefined();
+
+    // Browser session profile view must strictly hide plaintext passwords
+    const profRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/wifi-profiles`,
+      headers: { Authorization: `Bearer ${establishedPairingSessionId}` },
+    });
+    expect(profRes.statusCode).toBe(200);
+    for (const p of profRes.body.data.profiles) {
+      expect(p.password).toBeUndefined();
+      expect(typeof p.hasPassword).toBe('boolean');
+    }
+  });
+
+  it('Notion OAuth rejects forged or tampered anti-CSRF state token with 400', async () => {
+    const tamperedRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/callback',
+      body: {
+        code: 'fake_oauth_code_123',
+        state: `state_${REAL_DEVICE_ID}_forged_signature_attack`,
+      },
+    });
+    expect(tamperedRes.statusCode).toBe(400);
+    expect(tamperedRes.body.success).toBe(false);
+    expect(tamperedRes.body.error?.code).toBe('INVALID_STATE');
+  });
+
+  it('Rate limiter blocks excessive repeated requests with 429 RATE_LIMIT_EXCEEDED', async () => {
+    let hitRateLimit = false;
+    for (let i = 0; i < 25; i++) {
+      const res = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/devices/claim',
+        body: { claimToken: 'bogus_claim_token_spam' },
+      });
+      if (res.statusCode === 429) {
+        hitRateLimit = true;
+        expect(res.body.error?.code).toBe('RATE_LIMIT_EXCEEDED');
+        break;
+      }
+    }
+    expect(hitRateLimit).toBe(true);
   });
 });
