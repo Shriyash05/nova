@@ -1,0 +1,178 @@
+import type {
+  ApiResponse,
+  ClaimDevicePayload,
+  ClaimDeviceResult,
+  DeviceFullStatusResponse,
+  WifiScanResult,
+  WifiProvisionPayload,
+  WifiProvisionResult,
+  NotionAuthorizePayload,
+  NotionAuthorizeResult,
+  NotionCallbackPayload,
+  NotionDisconnectPayload,
+} from './types';
+import type { NotionConnectionInfo, NotionSyncTestResult } from '../domain/notion';
+import { mockApi } from './mockApi';
+
+export class NovaApiClient {
+  private baseUrl: string;
+  private useMock: boolean;
+
+  constructor() {
+    this.baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+    // Default to mock mode in dev/preview unless explicitly disabled
+    const mockEnv = import.meta.env.VITE_MOCK_API;
+    this.useMock = mockEnv === undefined || mockEnv === 'true' || mockEnv === '';
+  }
+
+  public setMockMode(enabled: boolean) {
+    this.useMock = enabled;
+  }
+
+  public isMockMode(): boolean {
+    return this.useMock;
+  }
+
+  public getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  public setBaseUrl(url: string) {
+    this.baseUrl = url;
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...((options.headers as Record<string, string>) || {}),
+    };
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: {
+            code: data?.error?.code || `HTTP_${response.status}`,
+            message: data?.error?.message || response.statusText || 'Network request failed',
+            details: data?.error?.details,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        data: data?.data ?? data,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown network failure';
+      return {
+        success: false,
+        error: {
+          code: 'FETCH_ERROR',
+          message: `Unable to connect to NOVA cloud backend at ${this.baseUrl || 'configured endpoint'}: ${message}`,
+        },
+      };
+    }
+  }
+
+  // API Methods
+  public async claimDevice(payload: ClaimDevicePayload): Promise<ApiResponse<ClaimDeviceResult>> {
+    if (this.useMock) {
+      return mockApi.claimDevice(payload);
+    }
+    return this.request<ClaimDeviceResult>('/api/v1/devices/claim', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async getDeviceStatus(deviceId: string): Promise<ApiResponse<DeviceFullStatusResponse>> {
+    if (this.useMock) {
+      return mockApi.getDeviceStatus(deviceId);
+    }
+    return this.request<DeviceFullStatusResponse>(`/api/v1/devices/${encodeURIComponent(deviceId)}/status`, {
+      method: 'GET',
+    });
+  }
+
+  public async scanWifi(deviceId?: string): Promise<ApiResponse<WifiScanResult>> {
+    if (this.useMock) {
+      return mockApi.scanWifi();
+    }
+    const path = deviceId ? `/api/v1/devices/${encodeURIComponent(deviceId)}/wifi/scan` : '/api/v1/wifi/scan';
+    return this.request<WifiScanResult>(path, {
+      method: 'GET',
+    });
+  }
+
+  public async provisionWifi(deviceId: string, payload: WifiProvisionPayload): Promise<ApiResponse<WifiProvisionResult>> {
+    if (this.useMock) {
+      return mockApi.provisionWifi(payload);
+    }
+    return this.request<WifiProvisionResult>(`/api/v1/devices/${encodeURIComponent(deviceId)}/wifi/provision`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async authorizeNotion(payload: NotionAuthorizePayload): Promise<ApiResponse<NotionAuthorizeResult>> {
+    if (this.useMock) {
+      return mockApi.authorizeNotion(payload);
+    }
+    return this.request<NotionAuthorizeResult>('/api/v1/auth/notion/authorize', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async callbackNotion(payload: NotionCallbackPayload): Promise<ApiResponse<NotionConnectionInfo>> {
+    if (this.useMock) {
+      return mockApi.callbackNotion(payload);
+    }
+    return this.request<NotionConnectionInfo>('/api/v1/auth/notion/callback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async disconnectNotion(deviceId: string, payload: NotionDisconnectPayload): Promise<ApiResponse<{ disconnected: boolean }>> {
+    if (this.useMock) {
+      return mockApi.disconnectNotion(payload);
+    }
+    return this.request<{ disconnected: boolean }>(`/api/v1/devices/${encodeURIComponent(deviceId)}/notion/disconnect`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async testSync(deviceId: string): Promise<ApiResponse<NotionSyncTestResult>> {
+    if (this.useMock) {
+      return mockApi.testSync();
+    }
+    return this.request<NotionSyncTestResult>(`/api/v1/devices/${encodeURIComponent(deviceId)}/sync/test`, {
+      method: 'POST',
+    });
+  }
+
+  public async factoryReset(deviceId: string, confirmSerial: string): Promise<ApiResponse<{ reset: boolean }>> {
+    if (this.useMock) {
+      return mockApi.factoryReset();
+    }
+    return this.request<{ reset: boolean }>(`/api/v1/devices/${encodeURIComponent(deviceId)}/factory-reset`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmSerial }),
+    });
+  }
+}
+
+// Global singleton client
+export const apiClient = new NovaApiClient();
