@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /*?token=*
+Disallow: /*?claim_token=*
+Disallow: /*?code=*
+
+Sitemap: https://buynovastore.vercel.app/sitemap.xml

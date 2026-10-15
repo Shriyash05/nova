@@ -1,28 +1,26 @@
 :root {
-  /* Color Palette - Dark Graphite & Deep Navy Foundation */
-  --bg-app: #07090e;
-  --bg-gradient: radial-gradient(circle at 50% 0%, #111a2e 0%, #07090e 70%);
-  --bg-surface: #0e1422;
-  --bg-surface-elevated: rgba(18, 25, 40, 0.75);
-  --bg-card: rgba(15, 22, 36, 0.82);
-  --bg-card-hover: rgba(22, 33, 54, 0.9);
-  --bg-input: rgba(10, 15, 26, 0.85);
-  --bg-pill: rgba(255, 255, 255, 0.05);
+  /* Color Palette — Solid Graphite Foundation (No Purple / No Slop Gradients) */
+  --bg-app: #090b10;
+  --bg-surface: #121620;
+  --bg-surface-elevated: #181e2b;
+  --bg-surface-active: #222938;
+  --bg-card: #131722;
+  --bg-card-hover: #192030;
+  --bg-input: #0c0f17;
+  --bg-pill: #1a2233;
 
-  /* Borders & Glassmorphism */
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* Borders — Real Structural Delimitation */
+  --border-subtle: #202737;
+  --border-strong: #2e384e;
   --border-focus: #00f2fe;
-  --border-glow: rgba(0, 242, 254, 0.35);
+  --border-glow: #00f2fe;
 
-  /* Accents - Electric Cyan & Precision Tech */
+  /* Accents — Hardware OLED Cyan & Electric Indicator Blue */
   --accent-cyan: #00f2fe;
   --accent-cyan-hover: #38f9d7;
-  --accent-blue: #4facfe;
+  --accent-blue: #3b82f6;
   --accent-cyan-dim: rgba(0, 242, 254, 0.12);
-  --accent-cyan-glow: 0 0 24px rgba(0, 242, 254, 0.28);
-  --gradient-cyan: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-  --gradient-cyan-subtle: linear-gradient(135deg, rgba(0, 242, 254, 0.15) 0%, rgba(79, 172, 254, 0.05) 100%);
+  --accent-blue-dim: rgba(59, 130, 246, 0.15);
 
   /* Status Colors */
   --status-success: #10b981;
@@ -31,39 +29,34 @@
   --status-warning-dim: rgba(245, 158, 11, 0.15);
   --status-error: #ef4444;
   --status-error-dim: rgba(239, 68, 68, 0.15);
-  --status-notion: #000000;
-  --status-notion-border: rgba(255, 255, 255, 0.2);
 
-  /* Typography Colors */
-  --text-primary: #f8fafc;
+  /* Typography Colors — High Contrast & Tactile Muted Inks */
+  --text-primary: #f0f4f8;
   --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-on-accent: #040810;
+  --text-muted: #8b9bb4;
+  --text-on-accent: #05080f;
 
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, Monaco, monospace;
+  /* Typography — Archivo Variable Display & Body */
+  --font-sans: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Archivo', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', SFMono, Menlo, Consolas, monospace;
 
-  /* Radii */
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  /* Radii — Precision Machined Hardware Curves */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 35px rgba(0, 242, 254, 0.18);
+  /* Transitions — Immediate, Physical Response */
+  --transition-fast: 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-smooth: 350ms cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Transitions */
-  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-normal: 250ms cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-smooth: 400ms cubic-bezier(0.16, 1, 0.3, 1);
-
-  /* Layout & Mobile Safari Viewport */
-  --max-content-width: 480px;
+  /* Layout Widths */
+  --max-content-width: 1200px;
+  --max-flow-width: 520px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);

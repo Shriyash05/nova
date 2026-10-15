@@ -637,6 +637,108 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
+    // 1b. POST /api/v1/launch-signup
+    // Real launch-update subscriber registration with anti-spam and persistence
+    // =========================================================================
+    if (pathname === '/api/v1/launch-signup' && method === 'POST') {
+      if (!await enforceSensitiveRateLimit(req, res, `signup:${getClientIp(req)}`, 5, 60000)) {
+        return;
+      }
+
+      // Honeypot anti-spam check: discard bot submissions silently
+      if (req.body?.website || req.body?.hp || req.body?.company) {
+        sendJson(res, 200, {
+          success: true,
+          data: { message: 'You have been added to the launch list.' },
+        });
+        return;
+      }
+
+      const emailRaw = req.body?.email;
+      if (!emailRaw || typeof emailRaw !== 'string') {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'INVALID_EMAIL', message: 'A valid email address is required.' },
+        });
+        return;
+      }
+
+      const email = emailRaw.trim().toLowerCase();
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+      if (!emailRegex.test(email) || email.length > 254) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'INVALID_EMAIL', message: 'Please provide a valid, well-formed email address.' },
+        });
+        return;
+      }
+
+      // Consent verification
+      if (req.body?.consent !== true) {
+        sendJson(res, 400, {
+          success: false,
+          error: { code: 'CONSENT_REQUIRED', message: 'Please confirm consent to receive NOVA launch updates.' },
+        });
+        return;
+      }
+
+      const subscriberId = `sub_${crypto.randomBytes(16).toString('hex')}`;
+      const clientIp = getClientIp(req);
+
+      try {
+        await queryDb(
+          `INSERT INTO launch_subscribers (id, email, consent, ip_address, created_at)
+           VALUES ($1, $2, TRUE, $3, NOW())
+           ON CONFLICT (email) DO NOTHING`,
+          [subscriberId, email, clientIp]
+        );
+
+        sendJson(res, 200, {
+          success: true,
+          data: {
+            message: "You're on the list. We'll send an update when batch availability and firmware milestones are released.",
+            email,
+          },
+        });
+        return;
+      } catch {
+        // Auto-create table if not yet migrated in connected DB
+        try {
+          await queryDb(`
+            CREATE TABLE IF NOT EXISTS launch_subscribers (
+              id VARCHAR(64) PRIMARY KEY,
+              email VARCHAR(255) NOT NULL UNIQUE,
+              consent BOOLEAN NOT NULL DEFAULT TRUE,
+              ip_address VARCHAR(45),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_launch_subscribers_email ON launch_subscribers(email);
+          `);
+          await queryDb(
+            `INSERT INTO launch_subscribers (id, email, consent, ip_address, created_at)
+             VALUES ($1, $2, TRUE, $3, NOW())
+             ON CONFLICT (email) DO NOTHING`,
+            [subscriberId, email, clientIp]
+          );
+          sendJson(res, 200, {
+            success: true,
+            data: {
+              message: "You're on the list. We'll send an update when batch availability and firmware milestones are released.",
+              email,
+            },
+          });
+          return;
+        } catch {
+          sendJson(res, 500, {
+            success: false,
+            error: { code: 'DATABASE_ERROR', message: 'Unable to register subscription. Please try again shortly.' },
+          });
+          return;
+        }
+      }
+    }
+
+    // =========================================================================
     // 2. POST /api/v1/devices/bootstrap
     // Unique per-device high-entropy bootstrap credential verification.
     // Hash is verified against server-side device_bootstrap_credentials table.

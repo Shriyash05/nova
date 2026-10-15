@@ -138,3 +138,14 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 CREATE INDEX IF NOT EXISTS idx_oauth_states_device_id ON oauth_states(device_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at);
 
+-- 10. Launch Conversion / Email Waitlist Signups
+CREATE TABLE IF NOT EXISTS launch_subscribers (
+    id VARCHAR(64) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    consent BOOLEAN NOT NULL DEFAULT TRUE,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_launch_subscribers_email ON launch_subscribers(email);
+

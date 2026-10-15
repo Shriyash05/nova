@@ -1300,6 +1300,61 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     }
   });
 
+  it('POST /api/v1/launch-signup validates email, enforces consent, and persists subscribers', async () => {
+    // 1. Rejects invalid email
+    const invalidEmailRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/launch-signup',
+      body: { email: 'not-an-email', consent: true },
+    });
+    expect(invalidEmailRes.statusCode).toBe(400);
+    expect(invalidEmailRes.body.error?.code).toBe('INVALID_EMAIL');
+
+    // 2. Rejects missing consent
+    const noConsentRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/launch-signup',
+      body: { email: 'maker@example.com', consent: false },
+    });
+    expect(noConsentRes.statusCode).toBe(400);
+    expect(noConsentRes.body.error?.code).toBe('CONSENT_REQUIRED');
+
+    // 3. Honeypot traps bots
+    const botRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/launch-signup',
+      body: { email: 'bot@spam.com', consent: true, website: 'http://spam.ru' },
+    });
+    expect(botRes.statusCode).toBe(200);
+
+    // 4. Successful subscriber registration
+    const testEmail = `tester_${Date.now()}@novadev.org`;
+    const signupRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/launch-signup',
+      body: { email: testEmail, consent: true },
+    });
+    expect(signupRes.statusCode).toBe(200);
+    expect(signupRes.body.success).toBe(true);
+
+    // 5. Duplicate signup is handled idempotently
+    const dupRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/launch-signup',
+      body: { email: testEmail, consent: true },
+    });
+    expect(dupRes.statusCode).toBe(200);
+    expect(dupRes.body.success).toBe(true);
+
+    // Clean up test subscriber
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await pool.query('DELETE FROM launch_subscribers WHERE email = $1', [testEmail]);
+    } finally {
+      await pool.end();
+    }
+  });
+
   it('Priority 2: Distributed rate limiting creates atomic ledger records in PostgreSQL', async () => {
     const testKey = `test_ratelimit_pg_${Date.now()}`;
     const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });

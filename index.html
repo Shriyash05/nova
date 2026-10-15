@@ -2,20 +2,83 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300f2fe' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='4'/><path d='M12 2v2'/><path d='M12 20v2'/><path d='m4.93 4.93 1.41 1.41'/><path d='m17.66 17.66 1.41 1.41'/><path d='M2 12h2'/><path d='M20 12h2'/><path d='m6.34 17.66-1.41 1.41'/><path d='m19.07 4.93-1.41 1.41'/></svg>" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#07090e" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b10" />
+    <meta name="color-scheme" content="dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    
-    <!-- SEO & Metadata -->
-    <title>NOVA — Voice Assistant Setup & Management</title>
-    <meta name="description" content="Set up, pair, connect Wi-Fi, and link Notion to your NOVA keychain voice assistant." />
-    
-    <!-- Fonts -->
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://buynovastore.vercel.app/" />
+
+    <!-- Primary SEO Metadata -->
+    <title>NOVA — Compact Keychain Voice Assistant with Monochrome OLED &amp; Notion Sync</title>
+    <meta name="description" content="Explore NOVA: an ambient keychain voice assistant built with ESP32-C3, SSD1306 monochrome OLED, and secure Notion synchronization. Review verified hardware specifications, security architecture, and join the launch list." />
+    <meta name="keywords" content="keychain voice assistant, ESP32-C3 voice assistant, OLED voice assistant, WakeNet, Notion sync, wearable assistant, open source hardware assistant" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://buynovastore.vercel.app/" />
+    <meta property="og:title" content="NOVA — Compact Keychain Voice Assistant" />
+    <meta property="og:description" content="A compact pocket voice assistant built on ESP32-C3 with a monochrome 128×64 OLED, WakeNet activation, and secure Notion synchronization." />
+    <meta property="og:image" content="https://buynovastore.vercel.app/images/nova-concept-hero.jpg" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="720" />
+    <meta property="og:image:alt" content="NOVA compact keychain voice assistant industrial design concept render" />
+    <meta property="og:site_name" content="NOVA" />
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://buynovastore.vercel.app/" />
+    <meta name="twitter:title" content="NOVA — Compact Keychain Voice Assistant" />
+    <meta name="twitter:description" content="Ambient voice assistant keychain featuring ESP32-C3, 128×64 monochrome OLED, and Notion cloud synchronization." />
+    <meta name="twitter:image" content="https://buynovastore.vercel.app/images/nova-concept-hero.jpg" />
+    <meta name="twitter:image:alt" content="NOVA compact keychain voice assistant concept render on slate" />
+
+    <!-- Typography: Archivo Variable (Display & Body) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet" />
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://buynovastore.vercel.app/#website",
+          "url": "https://buynovastore.vercel.app/",
+          "name": "NOVA",
+          "description": "Compact keychain voice assistant with monochrome OLED and Notion synchronization"
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://buynovastore.vercel.app/#organization",
+          "name": "NOVA Project",
+          "url": "https://buynovastore.vercel.app/",
+          "logo": "https://buynovastore.vercel.app/favicon.svg"
+        },
+        {
+          "@type": "Product",
+          "@id": "https://buynovastore.vercel.app/#product",
+          "name": "NOVA Keychain Voice Assistant",
+          "description": "A compact keychain voice assistant featuring an ESP32-C3 microcontroller, 128×64 SSD1306 monochrome OLED, MAX4466 microphone, and secure cloud synchronization.",
+          "image": "https://buynovastore.vercel.app/images/nova-concept-hero.jpg",
+          "category": "Electronics > Voice Assistants",
+          "offers": {
+            "@type": "Offer",
+            "availability": "https://schema.org/PreOrder",
+            "price": "0.00",
+            "priceCurrency": "USD",
+            "description": "Prototype stage. Physical units are in development; join launch list for availability updates."
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
