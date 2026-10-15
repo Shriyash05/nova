@@ -23,6 +23,10 @@ function getPool(): pg.Pool | null {
   return pool;
 }
 
+export function _setPoolForTesting(testPool: pg.Pool | null) {
+  pool = testPool;
+}
+
 // -----------------------------------------------------------------------------
 // Types & Voice Slots
 // -----------------------------------------------------------------------------
@@ -171,7 +175,8 @@ async function queryDb<T = any>(sql: string, params: unknown[] = []): Promise<T[
 
 // -----------------------------------------------------------------------------
 // Distributed Rate Limiting (Serverless & Cold-Start Resilient)
-// Backed by PostgreSQL rate_limits table with safe in-memory fallback
+// Backed by PostgreSQL rate_limits table.
+// Fails closed for sensitive endpoints during database outages to prevent brute force.
 // -----------------------------------------------------------------------------
 interface RateLimitBucket {
   count: number;
@@ -179,21 +184,39 @@ interface RateLimitBucket {
 }
 const rateLimitMap = new Map<string, RateLimitBucket>();
 
-function checkInMemoryRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+function checkInMemoryRateLimit(key: string, maxRequests: number, windowMs: number): { allowed: boolean; count: number; resetAt: number } {
   const now = Date.now();
   const bucket = rateLimitMap.get(key);
   if (!bucket || now > bucket.resetAt) {
-    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
+    const resetAt = now + windowMs;
+    rateLimitMap.set(key, { count: 1, resetAt });
+    return { allowed: true, count: 1, resetAt };
   }
   if (bucket.count >= maxRequests) {
-    return false;
+    return { allowed: false, count: bucket.count, resetAt: bucket.resetAt };
   }
   bucket.count++;
-  return true;
+  return { allowed: true, count: bucket.count, resetAt: bucket.resetAt };
 }
 
-export async function checkRateLimit(key: string, maxRequests: number, windowMs: number): Promise<boolean> {
+export interface RateLimitOptions {
+  failClosed?: boolean; // Defaults to true: sensitive endpoints reject requests when DB is unavailable
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  count: number;
+  resetAt: number;
+  dbUnavailable?: boolean;
+  fallbackUsed?: boolean;
+}
+
+export async function checkRateLimit(
+  key: string,
+  maxRequests: number,
+  windowMs: number,
+  options: RateLimitOptions = { failClosed: true }
+): Promise<RateLimitResult> {
   const p = getPool();
   if (p) {
     try {
@@ -204,17 +227,103 @@ export async function checkRateLimit(key: string, maxRequests: number, windowMs:
           count = CASE WHEN rate_limits.reset_at < NOW() THEN 1 ELSE rate_limits.count + 1 END,
           reset_at = CASE WHEN rate_limits.reset_at < NOW() THEN NOW() + ($2::text || ' milliseconds')::interval ELSE rate_limits.reset_at END,
           updated_at = NOW()
-        RETURNING count, reset_at;
+        RETURNING count, EXTRACT(EPOCH FROM reset_at) * 1000 AS reset_epoch;
       `;
-      const rows = await queryDb<{ count: number; reset_at: string }>(sql, [key, windowMs]);
+      const rows = await queryDb<{ count: number; reset_epoch: string }>(sql, [key, windowMs]);
       if (rows.length > 0) {
-        return rows[0].count <= maxRequests;
+        const count = Number(rows[0].count);
+        const resetAt = Math.round(Number(rows[0].reset_epoch));
+
+        // Opportunistic non-blocking prune of stale records (5% chance per request)
+        if (Math.random() < 0.05) {
+          pruneExpiredRateLimits().catch(() => {});
+        }
+
+        return {
+          allowed: count <= maxRequests,
+          count,
+          resetAt,
+        };
       }
     } catch {
-      // In case of transient DB failure, fall back safely to in-memory rate limiting
+      // Database query threw an error (connection lost, pool exhausted, or network outage)
+      if (options.failClosed !== false) {
+        return {
+          allowed: false,
+          count: maxRequests + 1,
+          resetAt: Date.now() + windowMs,
+          dbUnavailable: true,
+        };
+      }
     }
+  } else if (options.failClosed !== false) {
+    return {
+      allowed: false,
+      count: maxRequests + 1,
+      resetAt: Date.now() + windowMs,
+      dbUnavailable: true,
+    };
   }
-  return checkInMemoryRateLimit(key, maxRequests, windowMs);
+
+  // Non-sensitive endpoints fallback to in-memory rate limiting when database is unavailable
+  const inMem = checkInMemoryRateLimit(key, maxRequests, windowMs);
+  return {
+    allowed: inMem.allowed,
+    count: inMem.count,
+    resetAt: inMem.resetAt,
+    fallbackUsed: true,
+  };
+}
+
+export async function pruneExpiredRateLimits(olderThanMs: number = 60 * 60 * 1000): Promise<number> {
+  const p = getPool();
+  if (!p) return 0;
+  try {
+    const res = await queryDb<{ count: string }>(
+      `WITH deleted AS (
+         DELETE FROM rate_limits
+         WHERE reset_at < NOW() - ($1::text || ' milliseconds')::interval
+         RETURNING key
+       ) SELECT count(*) as count FROM deleted`,
+      [olderThanMs]
+    );
+    return parseInt(res[0]?.count || '0', 10);
+  } catch {
+    return 0;
+  }
+}
+
+async function enforceSensitiveRateLimit(
+  _req: ExtendedRequest,
+  res: ServerResponse,
+  key: string,
+  maxRequests: number,
+  windowMs: number
+): Promise<boolean> {
+  const result = await checkRateLimit(key, maxRequests, windowMs, { failClosed: true });
+  if (!result.allowed) {
+    if (result.dbUnavailable) {
+      sendJson(res, 503, {
+        success: false,
+        error: {
+          code: 'RATE_LIMIT_SERVICE_UNAVAILABLE',
+          message: 'Security validation service is temporarily unavailable. Request blocked for security.',
+        },
+      });
+      return false;
+    }
+    const retrySec = Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(retrySec));
+    sendJson(res, 429, {
+      success: false,
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests. Please slow down and try again later.',
+      },
+    });
+    return false;
+  }
+  return true;
 }
 
 function getClientIp(req: IncomingMessage): string {
@@ -535,14 +644,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Supports hardware recovery when recovery: true is requested with valid bootstrap credentials.
     // =========================================================================
     if (pathname === '/api/v1/devices/bootstrap' && method === 'POST') {
-      if (!await checkRateLimit(`bootstrap:${getClientIp(req)}`, 20, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Too many bootstrap requests. Please slow down.',
-          },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `bootstrap:${getClientIp(req)}`, 20, 60000)) {
         return;
       }
 
@@ -746,11 +848,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     const recoverMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/recover$/);
     if (recoverMatch && method === 'POST') {
       const targetDeviceId = decodeURIComponent(recoverMatch[1]);
-      if (!await checkRateLimit(`recover:${targetDeviceId}`, 20, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many recovery attempts. Please wait.' },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `recover:${targetDeviceId}`, 20, 60000)) {
         return;
       }
 
@@ -856,14 +954,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     const rotateKeyMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/device-key\/rotate$/);
     if (rotateKeyMatch && method === 'POST') {
       const targetDeviceId = decodeURIComponent(rotateKeyMatch[1]);
-      if (!await checkRateLimit(`rotate:${targetDeviceId}`, 20, 60000) || !await checkRateLimit(`rotate_ip:${getClientIp(req)}`, 30, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Too many rotation requests. Please wait before retrying.',
-          },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `rotate:${targetDeviceId}`, 20, 60000) || !await enforceSensitiveRateLimit(req, res, `rotate_ip:${getClientIp(req)}`, 30, 60000)) {
         return;
       }
 
@@ -897,11 +988,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     const claimTokenMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/claim-token$/);
     if (claimTokenMatch && method === 'POST') {
       const targetDeviceId = decodeURIComponent(claimTokenMatch[1]);
-      if (!await checkRateLimit(`claim_token:${targetDeviceId}`, 20, 60000) || !await checkRateLimit(`claim_token_ip:${getClientIp(req)}`, 30, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many claim token requests. Please wait.' },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `claim_token:${targetDeviceId}`, 20, 60000) || !await enforceSensitiveRateLimit(req, res, `claim_token_ip:${getClientIp(req)}`, 30, 60000)) {
         return;
       }
 
@@ -1076,14 +1163,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Validates 15-minute ephemeral token and grants durable pairing session
     // =========================================================================
     if (pathname === '/api/v1/devices/claim' && method === 'POST') {
-      if (!await checkRateLimit(`claim:${getClientIp(req)}`, 20, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Too many claim attempts. Please wait a moment before trying again.',
-          },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `claim:${getClientIp(req)}`, 20, 60000)) {
         return;
       }
 
@@ -1973,11 +2053,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // 10. POST / GET /api/v1/auth/notion/authorize
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/authorize') {
-      if (!await checkRateLimit(`oauth_auth:${getClientIp(req)}`, 30, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many authorization attempts. Please wait.' },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `oauth_auth:${getClientIp(req)}`, 30, 60000)) {
         return;
       }
 
@@ -2089,11 +2165,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // 11. POST / GET /api/v1/auth/notion/callback
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/callback') {
-      if (!await checkRateLimit(`oauth_cb:${getClientIp(req)}`, 30, 60000)) {
-        sendJson(res, 429, {
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many callback requests. Please wait.' },
-        });
+      if (!await enforceSensitiveRateLimit(req, res, `oauth_cb:${getClientIp(req)}`, 30, 60000)) {
         return;
       }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import handler, { checkRateLimit } from '../../api/index.ts';
+import handler, { checkRateLimit, pruneExpiredRateLimits, _setPoolForTesting } from '../../api/index.ts';
 import healthHandler from '../../api/health.ts';
 import crypto from 'crypto';
 import pg from 'pg';
@@ -1094,6 +1094,7 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     // 1. Pre-enroll synthetic device credentials in DB (clearing any prior run artifacts)
     const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
     try {
+      await pool.query('DELETE FROM notion_authorizations WHERE device_id = $1', [SYNTH_DEVICE_ID]);
       await pool.query('DELETE FROM wifi_profiles WHERE device_id = $1', [SYNTH_DEVICE_ID]);
       await pool.query('DELETE FROM devices WHERE id = $1', [SYNTH_DEVICE_ID]);
       await pool.query(
@@ -1145,6 +1146,19 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
       },
     });
     expect(addProfRes.statusCode).toBe(201);
+
+    // Seed Notion auth to verify cloud integrations persist across recovery
+    const poolSeed = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await poolSeed.query(
+        `INSERT INTO notion_authorizations (device_id, workspace_name, encrypted_access_token)
+         VALUES ($1, 'Synth Workspace', 'enc_mock_token_123')
+         ON CONFLICT (device_id) DO UPDATE SET workspace_name = 'Synth Workspace'`,
+        [SYNTH_DEVICE_ID]
+      );
+    } finally {
+      await poolSeed.end();
+    }
 
     // 4. Authenticate with synthKeyA (heartbeat)
     const hbResA = await simulateRequest({
@@ -1199,6 +1213,24 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     });
     expect(hbResRevoked.statusCode).toBe(401);
 
+    // 7b. Attempt recovery knowing ONLY the public device ID (no credential) -> MUST be rejected (401)
+    const unauthRecover = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/recover`,
+      headers: {},
+    });
+    expect(unauthRecover.statusCode).toBe(401);
+    expect(unauthRecover.body.error?.code).toBe('INVALID_BOOTSTRAP_CREDENTIAL');
+
+    // 7c. Attempt recovery with wrong credential -> MUST be rejected (401)
+    const wrongCredRecover = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/recover`,
+      headers: { 'x-nova-bootstrap': 'wrong_bootstrap_secret_123456789' },
+    });
+    expect(wrongCredRecover.statusCode).toBe(401);
+    expect(wrongCredRecover.body.error?.code).toBe('INVALID_BOOTSTRAP_CREDENTIAL');
+
     // 8. Recover device via hardware bootstrap credential
     const recoverRes = await simulateRequest({
       method: 'POST',
@@ -1211,6 +1243,17 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     expect(synthKeyC).toMatch(/^dkey_/);
     expect(synthKeyC).not.toBe(synthKeyB);
 
+    // 8b. Issue recovery claim token & QR portal URL using the replacement device key
+    const recoveryClaimRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/claim-token`,
+      headers: { Authorization: `Bearer ${synthKeyC}` },
+    });
+    expect(recoveryClaimRes.statusCode).toBe(200);
+    expect(recoveryClaimRes.body.data.claimToken).toMatch(/^clm_live_/);
+    expect(recoveryClaimRes.body.data.portalUrl).toContain('https://buynovastore.vercel.app/?token=');
+    expect(recoveryClaimRes.body.data.shortCode).toMatch(/^NOV-/);
+
     // 9. Confirm new key works and old keys remain rejected
     const hbResRecovered = await simulateRequest({
       method: 'POST',
@@ -1220,7 +1263,7 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     });
     expect(hbResRecovered.statusCode).toBe(200);
 
-    // 10. Verify that all Wi-Fi profiles and device configuration are preserved intact!
+    // 10. Verify that all Wi-Fi profiles, Notion authorization, and device configuration are preserved intact!
     const vaultRes = await simulateRequest({
       method: 'GET',
       url: `/api/v1/devices/${SYNTH_DEVICE_ID}/wifi-profiles`,
@@ -1230,11 +1273,28 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     expect(vaultRes.body.data.profiles.length).toBe(1);
     expect(vaultRes.body.data.profiles[0].ssid).toBe('SynthNet_Vault');
 
+    const poolCheck = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      const devRows = await poolCheck.query('SELECT serial_number, mac_address FROM devices WHERE id = $1', [SYNTH_DEVICE_ID]);
+      expect(devRows.rows.length).toBe(1);
+      expect(devRows.rows[0].mac_address).toBe(SYNTH_MAC);
+
+      const notionRows = await poolCheck.query('SELECT workspace_name FROM notion_authorizations WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      expect(notionRows.rows.length).toBe(1);
+      expect(notionRows.rows[0].workspace_name).toBe('Synth Workspace');
+    } finally {
+      await poolCheck.end();
+    }
+
     // 11. Clean up synthetic fixtures
     const pool3 = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
     try {
       await pool3.query('DELETE FROM devices WHERE id = $1', [SYNTH_DEVICE_ID]);
       await pool3.query('DELETE FROM device_bootstrap_credentials WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      await pool3.query('DELETE FROM wifi_profiles WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      await pool3.query('DELETE FROM pairing_sessions WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      await pool3.query('DELETE FROM claim_tokens WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      await pool3.query('DELETE FROM notion_authorizations WHERE device_id = $1', [SYNTH_DEVICE_ID]);
     } finally {
       await pool3.end();
     }
@@ -1249,9 +1309,10 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
       const allowed2 = await checkRateLimit(testKey, 2, 60000);
       const allowed3 = await checkRateLimit(testKey, 2, 60000);
 
-      expect(allowed1).toBe(true);
-      expect(allowed2).toBe(true);
-      expect(allowed3).toBe(false);
+      expect(allowed1.allowed).toBe(true);
+      expect(allowed2.allowed).toBe(true);
+      expect(allowed3.allowed).toBe(false);
+      expect(allowed3.count).toBe(3);
 
       const rows = await pool.query<{ key: string; count: number }>('SELECT key, count FROM rate_limits WHERE key = $1', [testKey]);
       expect(rows.rows.length).toBe(1);
@@ -1259,6 +1320,148 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
 
       await pool.query('DELETE FROM rate_limits WHERE key = $1', [testKey]);
     } finally {
+      await pool.end();
+    }
+  });
+
+  it('Priority 2: Rate limiter fails closed during database outage for sensitive endpoints, keeps health accessible', async () => {
+    const mockErrorPool: any = {
+      query: async () => {
+        throw new Error('DATABASE_CONNECTION_LOST: connection terminated unexpectedly');
+      },
+    };
+
+    _setPoolForTesting(mockErrorPool);
+
+    try {
+      // 1. checkRateLimit with failClosed: true (default for sensitive endpoints) fails closed
+      const sensitiveCheck = await checkRateLimit('sensitive_test_key', 5, 60000, { failClosed: true });
+      expect(sensitiveCheck.allowed).toBe(false);
+      expect(sensitiveCheck.dbUnavailable).toBe(true);
+
+      // 2. checkRateLimit with failClosed: false (for non-sensitive health endpoints) falls back cleanly
+      const publicCheck = await checkRateLimit('public_test_key', 5, 60000, { failClosed: false });
+      expect(publicCheck.allowed).toBe(true);
+      expect(publicCheck.fallbackUsed).toBe(true);
+
+      // 3. Sensitive endpoint (e.g. bootstrap) returns 503 RATE_LIMIT_SERVICE_UNAVAILABLE
+      const bootOutageRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/devices/bootstrap',
+        body: {
+          deviceId: 'nova-test-outage',
+          macAddress: '11:22:33:44:55:66',
+          bootstrapCredential: 'test_bootstrap_cred',
+        },
+      });
+      expect(bootOutageRes.statusCode).toBe(503);
+      expect(bootOutageRes.body.error?.code).toBe('RATE_LIMIT_SERVICE_UNAVAILABLE');
+
+      // 4. Sensitive endpoint (e.g. recover) returns 503 RATE_LIMIT_SERVICE_UNAVAILABLE
+      const recoverOutageRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/devices/nova-test-outage/recover',
+        headers: { 'x-nova-bootstrap': 'test_bootstrap_cred' },
+      });
+      expect(recoverOutageRes.statusCode).toBe(503);
+      expect(recoverOutageRes.body.error?.code).toBe('RATE_LIMIT_SERVICE_UNAVAILABLE');
+
+      // 5. Non-sensitive health check remains available and returns 200 with database disconnected status
+      const healthOutageRes = await simulateRequest({
+        method: 'GET',
+        url: '/api/health',
+      });
+      expect(healthOutageRes.statusCode).toBe(200);
+      expect(healthOutageRes.body.database?.connected).toBe(false);
+    } finally {
+      // Restore real database pool
+      _setPoolForTesting(null);
+    }
+  });
+
+  it('Priority 2: Concurrent requests are handled atomically by distributed PostgreSQL rate limiter', async () => {
+    const concurrentKey = `test_concurrent_${Date.now()}`;
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+
+    try {
+      // Fire 10 concurrent requests with maxRequests = 4
+      const promises = Array.from({ length: 10 }, () => checkRateLimit(concurrentKey, 4, 60000));
+      const results = await Promise.all(promises);
+
+      const allowedCount = results.filter((r) => r.allowed).length;
+      const blockedCount = results.filter((r) => !r.allowed).length;
+
+      expect(allowedCount).toBe(4);
+      expect(blockedCount).toBe(6);
+
+      const rows = await pool.query<{ count: number }>('SELECT count FROM rate_limits WHERE key = $1', [concurrentKey]);
+      expect(rows.rows.length).toBe(1);
+      expect(rows.rows[0].count).toBe(10);
+    } finally {
+      await pool.query('DELETE FROM rate_limits WHERE key = $1', [concurrentKey]);
+      await pool.end();
+    }
+  });
+
+  it('Priority 2: Counter resets after window expiration', async () => {
+    const resetKey = `test_reset_${Date.now()}`;
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+
+    try {
+      // Insert pre-expired record (reset_at in the past)
+      await pool.query(
+        `INSERT INTO rate_limits (key, count, reset_at, updated_at)
+         VALUES ($1, 5, NOW() - INTERVAL '5 seconds', NOW())`,
+        [resetKey]
+      );
+
+      // Next request should reset count to 1 and be allowed
+      const result = await checkRateLimit(resetKey, 2, 60000);
+      expect(result.allowed).toBe(true);
+      expect(result.count).toBe(1);
+
+      const rows = await pool.query<{ count: number }>('SELECT count FROM rate_limits WHERE key = $1', [resetKey]);
+      expect(rows.rows.length).toBe(1);
+      expect(rows.rows[0].count).toBe(1);
+    } finally {
+      await pool.query('DELETE FROM rate_limits WHERE key = $1', [resetKey]);
+      await pool.end();
+    }
+  });
+
+  it('Priority 2: pruneExpiredRateLimits purges stale records and prevents unbounded growth', async () => {
+    const staleKey = `test_stale_${Date.now()}`;
+    const freshKey = `test_fresh_${Date.now()}`;
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+
+    try {
+      // Insert a stale record (expired 2 hours ago)
+      await pool.query(
+        `INSERT INTO rate_limits (key, count, reset_at, updated_at)
+         VALUES ($1, 10, NOW() - INTERVAL '2 hours', NOW())`,
+        [staleKey]
+      );
+
+      // Insert a fresh active record (expires in 1 hour)
+      await pool.query(
+        `INSERT INTO rate_limits (key, count, reset_at, updated_at)
+         VALUES ($1, 2, NOW() + INTERVAL '1 hour', NOW())`,
+        [freshKey]
+      );
+
+      // Prune records older than 30 minutes
+      const prunedCount = await pruneExpiredRateLimits(30 * 60 * 1000);
+      expect(prunedCount).toBeGreaterThanOrEqual(1);
+
+      // Stale record should be gone
+      const staleRows = await pool.query('SELECT key FROM rate_limits WHERE key = $1', [staleKey]);
+      expect(staleRows.rows.length).toBe(0);
+
+      // Fresh record should still exist
+      const freshRows = await pool.query('SELECT key FROM rate_limits WHERE key = $1', [freshKey]);
+      expect(freshRows.rows.length).toBe(1);
+    } finally {
+      await pool.query('DELETE FROM rate_limits WHERE key IN ($1, $2)', [staleKey, freshKey]);
       await pool.end();
     }
   });
