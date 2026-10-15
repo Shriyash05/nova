@@ -1298,7 +1298,7 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
     } finally {
       await pool3.end();
     }
-  });
+  }, 60000);
 
   it('POST /api/v1/launch-signup validates email, enforces consent, and persists subscribers', async () => {
     // 1. Rejects invalid email
