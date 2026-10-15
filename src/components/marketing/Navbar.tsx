@@ -4,9 +4,10 @@ import { Menu, X, ArrowRight, Lock, Radio } from 'lucide-react';
 export interface NavbarProps {
   onOpenLockedModal: (actionType: 'buy' | 'setup') => void;
   onEnterDevLab?: () => void;
+  onSignupClick?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab, onSignupClick }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const scrollToSection = (id: string) => {
@@ -241,7 +242,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
 
           {/* Real Launch Conversion Button */}
           <button
-            onClick={() => scrollToSection('launch-signup')}
+            onClick={onSignupClick || (() => scrollToSection('launch-signup'))}
             style={{
               backgroundColor: 'var(--accent-cyan)',
               color: 'var(--text-on-accent)',
