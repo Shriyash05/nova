@@ -16,13 +16,40 @@ function getPool(): pg.Pool | null {
   return pool;
 }
 
-export default async function handler(_req: IncomingMessage, res: ServerResponse) {
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  const origin = req.headers.origin;
+  const EXACT_ALLOWED_ORIGINS = [
+    'https://buynovastore.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+  ];
+  const PREVIEW_ORIGIN_REGEX = /^https:\/\/nova-[a-z0-9-]+-shriyash05s-projects\.vercel\.app$/;
+  const isOriginAllowed = origin
+    ? EXACT_ALLOWED_ORIGINS.includes(origin) || PREVIEW_ORIGIN_REGEX.test(origin)
+    : false;
 
-  if (_req.method === 'OPTIONS') {
-    res.statusCode = 200;
+  if (origin) {
+    if (isOriginAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', 'https://buynovastore.vercel.app');
+    }
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'OPTIONS') {
+    if (origin && !isOriginAllowed) {
+      res.statusCode = 403;
+      res.end();
+      return;
+    }
+    res.statusCode = 204;
     res.end();
     return;
   }
