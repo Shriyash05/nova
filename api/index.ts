@@ -15,9 +15,9 @@ function getPool(): pg.Pool | null {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false }, // Required for Supabase pooler connection
-      max: 2,
+      max: 5,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
     });
   }
   return pool;
@@ -158,7 +158,20 @@ function hashToken(token: string): string {
 }
 
 // -----------------------------------------------------------------------------
-// In-Memory Rate Limiting
+// Database Operations (Strict Postgres in Production)
+// -----------------------------------------------------------------------------
+async function queryDb<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const p = getPool();
+  if (!p) {
+    throw new Error('DATABASE_NOT_CONFIGURED: DATABASE_URL is required to perform persistent database operations.');
+  }
+  const result = await p.query(sql, params);
+  return result.rows as T[];
+}
+
+// -----------------------------------------------------------------------------
+// Distributed Rate Limiting (Serverless & Cold-Start Resilient)
+// Backed by PostgreSQL rate_limits table with safe in-memory fallback
 // -----------------------------------------------------------------------------
 interface RateLimitBucket {
   count: number;
@@ -166,7 +179,7 @@ interface RateLimitBucket {
 }
 const rateLimitMap = new Map<string, RateLimitBucket>();
 
-function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+function checkInMemoryRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
   const now = Date.now();
   const bucket = rateLimitMap.get(key);
   if (!bucket || now > bucket.resetAt) {
@@ -180,6 +193,30 @@ function checkRateLimit(key: string, maxRequests: number, windowMs: number): boo
   return true;
 }
 
+export async function checkRateLimit(key: string, maxRequests: number, windowMs: number): Promise<boolean> {
+  const p = getPool();
+  if (p) {
+    try {
+      const sql = `
+        INSERT INTO rate_limits (key, count, reset_at, updated_at)
+        VALUES ($1, 1, NOW() + ($2::text || ' milliseconds')::interval, NOW())
+        ON CONFLICT (key) DO UPDATE SET
+          count = CASE WHEN rate_limits.reset_at < NOW() THEN 1 ELSE rate_limits.count + 1 END,
+          reset_at = CASE WHEN rate_limits.reset_at < NOW() THEN NOW() + ($2::text || ' milliseconds')::interval ELSE rate_limits.reset_at END,
+          updated_at = NOW()
+        RETURNING count, reset_at;
+      `;
+      const rows = await queryDb<{ count: number; reset_at: string }>(sql, [key, windowMs]);
+      if (rows.length > 0) {
+        return rows[0].count <= maxRequests;
+      }
+    } catch {
+      // In case of transient DB failure, fall back safely to in-memory rate limiting
+    }
+  }
+  return checkInMemoryRateLimit(key, maxRequests, windowMs);
+}
+
 function getClientIp(req: IncomingMessage): string {
   const xForwardedFor = req.headers['x-forwarded-for'];
   if (typeof xForwardedFor === 'string') {
@@ -189,7 +226,7 @@ function getClientIp(req: IncomingMessage): string {
 }
 
 // -----------------------------------------------------------------------------
-// Notion OAuth Signed State (Anti-CSRF)
+// Notion OAuth Signed State (Anti-CSRF & Anti-Replay)
 // -----------------------------------------------------------------------------
 function generateSignedOAuthState(deviceId: string): string {
   const secret = process.env.SESSION_SECRET || 'nova_oauth_hmac_secret_key_2026';
@@ -224,18 +261,6 @@ function verifySignedOAuthState(state: string): { valid: boolean; deviceId?: str
     return { valid: false, error: 'Cryptographic state validation failure. Potential CSRF attempt detected.' };
   }
   return { valid: true, deviceId };
-}
-
-// -----------------------------------------------------------------------------
-// Database Operations (Strict Postgres in Production)
-// -----------------------------------------------------------------------------
-async function queryDb<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
-  const p = getPool();
-  if (!p) {
-    throw new Error('DATABASE_NOT_CONFIGURED: DATABASE_URL is required to perform persistent database operations.');
-  }
-  const result = await p.query(sql, params);
-  return result.rows as T[];
 }
 
 async function withTransaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> {
@@ -410,21 +435,28 @@ async function authenticateDeviceRequest(
 // Main Serverless Handler
 // -----------------------------------------------------------------------------
 export default async function handler(req: ExtendedRequest, res: ServerResponse) {
-  // CORS configuration with narrow origin authorization
+  // Strict CORS configuration with narrow origin authorization
   const origin = req.headers.origin;
-  const ALLOWED_ORIGINS = [
+  const EXACT_ALLOWED_ORIGINS = [
     'https://buynovastore.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
   ];
+  // Allow official preview branches strictly for this project
+  const PREVIEW_ORIGIN_REGEX = /^https:\/\/nova-[a-z0-9-]+-shriyash05s-projects\.vercel\.app$/;
+
+  const isOriginAllowed = origin
+    ? EXACT_ALLOWED_ORIGINS.includes(origin) || PREVIEW_ORIGIN_REGEX.test(origin)
+    : false;
+
   if (origin) {
-    const isAllowed = ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.vercel.app');
-    if (isAllowed) {
+    if (isOriginAllowed) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     } else {
+      // Do not allow unauthorized origin or echo it back
       res.setHeader('Access-Control-Allow-Origin', 'https://buynovastore.vercel.app');
     }
   } else {
@@ -432,11 +464,16 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-idempotency-key, If-None-Match');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-nova-recovery, x-idempotency-key, If-None-Match');
   res.setHeader('Access-Control-Expose-Headers', 'ETag');
 
   if (req.method === 'OPTIONS') {
-    res.statusCode = 200;
+    if (origin && !isOriginAllowed) {
+      res.statusCode = 403;
+      res.end();
+      return;
+    }
+    res.statusCode = 204;
     res.end();
     return;
   }
@@ -495,9 +532,10 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Unique per-device high-entropy bootstrap credential verification.
     // Hash is verified against server-side device_bootstrap_credentials table.
     // Never uses a shared secret; issues rotatable deviceKey and single-use 15m claim token.
+    // Supports hardware recovery when recovery: true is requested with valid bootstrap credentials.
     // =========================================================================
     if (pathname === '/api/v1/devices/bootstrap' && method === 'POST') {
-      if (!checkRateLimit(`bootstrap:${getClientIp(req)}`, 20, 60000)) {
+      if (!await checkRateLimit(`bootstrap:${getClientIp(req)}`, 20, 60000)) {
         sendJson(res, 429, {
           success: false,
           error: {
@@ -573,15 +611,26 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           });
           return;
         }
-        if (credRows[0].is_used) {
-          sendJson(res, 409, {
-            success: false,
-            error: {
-              code: 'BOOTSTRAP_ALREADY_USED',
-              message: 'This device bootstrap credential has already been redeemed. Single-use enrollment guarantee enforced.',
-            },
-          });
-          return;
+        const isRecovery = Boolean(
+          req.body?.recovery === true ||
+          req.body?.allowRecovery === true ||
+          getHeader(req, 'x-nova-recovery') === 'true'
+        );
+        if (credRows[0].is_used && !isRecovery) {
+          const existingDev = await queryDb<{ device_secret: string | null }>(
+            'SELECT device_secret FROM devices WHERE id = $1',
+            [deviceId]
+          );
+          if (existingDev.length > 0 && existingDev[0].device_secret !== null) {
+            sendJson(res, 409, {
+              success: false,
+              error: {
+                code: 'BOOTSTRAP_ALREADY_USED',
+                message: 'This device bootstrap credential has already been redeemed. Single-use enrollment guarantee enforced.',
+              },
+            });
+            return;
+          }
         }
         // Mark used
         await queryDb('UPDATE device_bootstrap_credentials SET is_used = TRUE, used_at = NOW() WHERE device_id = $1', [deviceId]);
@@ -688,12 +737,126 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
+    // 2.1 POST /api/v1/devices/:deviceId/recover
+    // Dedicated hardware recovery endpoint for legitimate devices whose keys
+    // were revoked or lost. Verifies hardware bootstrap credential against
+    // server-side hash, issues fresh device key & OLED claim token, and
+    // preserves all Wi-Fi profiles, Notion authorizations, and queue data.
+    // =========================================================================
+    const recoverMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/recover$/);
+    if (recoverMatch && method === 'POST') {
+      const targetDeviceId = decodeURIComponent(recoverMatch[1]);
+      if (!await checkRateLimit(`recover:${targetDeviceId}`, 20, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many recovery attempts. Please wait.' },
+        });
+        return;
+      }
+
+      const bootstrapCredential =
+        (req.body?.bootstrapCredential as string) ||
+        getHeader(req, 'x-nova-bootstrap') ||
+        (getHeader(req, 'authorization')?.startsWith('Bearer ') ? getHeader(req, 'authorization')!.substring(7).trim() : '');
+
+      if (!bootstrapCredential || typeof bootstrapCredential !== 'string' || !bootstrapCredential.trim()) {
+        sendJson(res, 401, {
+          success: false,
+          error: {
+            code: 'INVALID_BOOTSTRAP_CREDENTIAL',
+            message: 'A unique device bootstrap credential is required for hardware recovery.',
+          },
+        });
+        return;
+      }
+
+      const cleanSecret = bootstrapCredential.trim();
+      const presentedHash = crypto.createHash('sha256').update(cleanSecret).digest('hex');
+
+      const credRows = await queryDb<{ credential_hash: string }>(
+        'SELECT credential_hash FROM device_bootstrap_credentials WHERE device_id = $1',
+        [targetDeviceId]
+      );
+
+      let verified = false;
+      if (credRows.length > 0 && credRows[0].credential_hash === presentedHash) {
+        verified = true;
+      } else {
+        const devRows = await queryDb<{ bootstrap_hash: string | null }>(
+          'SELECT bootstrap_hash FROM devices WHERE id = $1',
+          [targetDeviceId]
+        );
+        if (devRows.length > 0 && devRows[0].bootstrap_hash === presentedHash) {
+          verified = true;
+        }
+      }
+
+      if (!verified) {
+        sendJson(res, 401, {
+          success: false,
+          error: {
+            code: 'INVALID_BOOTSTRAP_CREDENTIAL',
+            message: 'Device bootstrap credential hash mismatch. Unauthorized hardware recovery.',
+          },
+        });
+        return;
+      }
+
+      // Generate high-entropy 192-bit replacement device key and store SHA-256 hash
+      const rawDeviceKey = `dkey_${crypto.randomBytes(24).toString('hex')}`;
+      const deviceKeyHash = hashToken(rawDeviceKey);
+
+      // Update device record (preserves all Wi-Fi profiles, Notion auth, and queue)
+      await queryDb(
+        `UPDATE devices SET
+          device_secret = $1,
+          status = 'online',
+          oled_state = 'pairing_qr',
+          last_heartbeat = NOW(),
+          updated_at = NOW()
+         WHERE id = $2`,
+        [deviceKeyHash, targetDeviceId]
+      );
+
+      // Invalidate any unredeemed prior tokens for this device
+      await queryDb('DELETE FROM claim_tokens WHERE device_id = $1 AND is_redeemed = FALSE', [targetDeviceId]);
+
+      // Generate fresh 15-minute claim token for OLED QR
+      const randomSuffix = crypto.randomBytes(4).toString('hex');
+      const token = `clm_live_${randomSuffix}`;
+      const shortCode = `NOV-${randomSuffix.toUpperCase()}`;
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+      await queryDb(
+        `INSERT INTO claim_tokens (token, device_id, short_code, expires_at, is_redeemed)
+         VALUES ($1, $2, $3, $4, FALSE);`,
+        [token, targetDeviceId, shortCode, expiresAt]
+      );
+
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          deviceId: targetDeviceId,
+          recovered: true,
+          claimToken: token,
+          shortCode,
+          expiresAt,
+          expiresInSeconds: 900,
+          deviceKey: rawDeviceKey,
+          portalUrl: `https://buynovastore.vercel.app/?token=${token}`,
+        },
+      });
+      return;
+    }
+
+    // =========================================================================
     // 3. POST /api/v1/devices/:deviceId/device-key/rotate
     // Authenticated rotation of device credentials
     // =========================================================================
     const rotateKeyMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/device-key\/rotate$/);
     if (rotateKeyMatch && method === 'POST') {
-      if (!checkRateLimit(`rotate:${getClientIp(req)}`, 20, 60000)) {
+      const targetDeviceId = decodeURIComponent(rotateKeyMatch[1]);
+      if (!await checkRateLimit(`rotate:${targetDeviceId}`, 20, 60000) || !await checkRateLimit(`rotate_ip:${getClientIp(req)}`, 30, 60000)) {
         sendJson(res, 429, {
           success: false,
           error: {
@@ -704,7 +867,6 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
-      const targetDeviceId = decodeURIComponent(rotateKeyMatch[1]);
       const auth = await authenticateDeviceRequest(req, targetDeviceId);
       if (!auth.authorized) {
         sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
@@ -729,15 +891,62 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
     // =========================================================================
     // 4. POST /api/v1/devices/:deviceId/claim-token
-    // Generates fresh, single-use 15-minute claim token for OLED QR pairing/recovery
+    // Generates fresh, single-use 15-minute claim token for OLED QR pairing/recovery.
+    // Accepts Bearer authentication OR unique hardware bootstrap credential.
     // =========================================================================
     const claimTokenMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/claim-token$/);
     if (claimTokenMatch && method === 'POST') {
       const targetDeviceId = decodeURIComponent(claimTokenMatch[1]);
-      const auth = await authenticateDeviceRequest(req, targetDeviceId);
+      if (!await checkRateLimit(`claim_token:${targetDeviceId}`, 20, 60000) || !await checkRateLimit(`claim_token_ip:${getClientIp(req)}`, 30, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many claim token requests. Please wait.' },
+        });
+        return;
+      }
+
+      // Check standard Bearer auth first
+      let auth = await authenticateDeviceRequest(req, targetDeviceId);
+      let isBootstrapRecovery = false;
+
+      // If not Bearer authorized, check for hardware bootstrap credential recovery
       if (!auth.authorized) {
+        const bootstrapCredential =
+          (req.body?.bootstrapCredential as string) ||
+          getHeader(req, 'x-nova-bootstrap');
+
+        if (bootstrapCredential && typeof bootstrapCredential === 'string' && bootstrapCredential.trim()) {
+          const cleanSecret = bootstrapCredential.trim();
+          const presentedHash = crypto.createHash('sha256').update(cleanSecret).digest('hex');
+          const credRows = await queryDb<{ credential_hash: string }>(
+            'SELECT credential_hash FROM device_bootstrap_credentials WHERE device_id = $1',
+            [targetDeviceId]
+          );
+          if (credRows.length > 0 && credRows[0].credential_hash === presentedHash) {
+            isBootstrapRecovery = true;
+          } else {
+            const devRows = await queryDb<{ bootstrap_hash: string | null }>(
+              'SELECT bootstrap_hash FROM devices WHERE id = $1',
+              [targetDeviceId]
+            );
+            if (devRows.length > 0 && devRows[0].bootstrap_hash === presentedHash) {
+              isBootstrapRecovery = true;
+            }
+          }
+        }
+      }
+
+      if (!auth.authorized && !isBootstrapRecovery) {
         sendJson(res, auth.status, { success: false, error: { code: auth.code, message: auth.message } });
         return;
+      }
+
+      let newDeviceKey: string | undefined;
+      if (isBootstrapRecovery) {
+        // Recovery path: issue new deviceKey as well
+        newDeviceKey = `dkey_${crypto.randomBytes(24).toString('hex')}`;
+        const newKeyHash = hashToken(newDeviceKey);
+        await queryDb("UPDATE devices SET device_secret = $1, status = 'online', updated_at = NOW() WHERE id = $2", [newKeyHash, targetDeviceId]);
       }
 
       // Invalidate existing unredeemed tokens
@@ -764,6 +973,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           shortCode,
           expiresAt,
           expiresInSeconds: 900,
+          deviceKey: newDeviceKey,
           portalUrl: `https://buynovastore.vercel.app/?token=${token}`,
         },
       });
@@ -866,7 +1076,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // Validates 15-minute ephemeral token and grants durable pairing session
     // =========================================================================
     if (pathname === '/api/v1/devices/claim' && method === 'POST') {
-      if (!checkRateLimit(`claim:${getClientIp(req)}`, 20, 60000)) {
+      if (!await checkRateLimit(`claim:${getClientIp(req)}`, 20, 60000)) {
         sendJson(res, 429, {
           success: false,
           error: {
@@ -1763,6 +1973,14 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // 10. POST / GET /api/v1/auth/notion/authorize
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/authorize') {
+      if (!await checkRateLimit(`oauth_auth:${getClientIp(req)}`, 30, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many authorization attempts. Please wait.' },
+        });
+        return;
+      }
+
       const deviceId =
         (req.body?.deviceId as string) ||
         url.searchParams.get('deviceId');
@@ -1776,6 +1994,43 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           },
         });
         return;
+      }
+
+      // Extract session token from Bearer auth, query, or body
+      let sessionId: string | null = null;
+      const authHeader = getHeader(req, 'authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        sessionId = authHeader.substring(7).trim();
+      } else if (req.body?.sessionId && typeof req.body.sessionId === 'string') {
+        sessionId = req.body.sessionId.trim();
+      } else if (req.body?.pairingSessionId && typeof req.body.pairingSessionId === 'string') {
+        sessionId = req.body.pairingSessionId.trim();
+      } else if (url.searchParams.get('session')) {
+        sessionId = url.searchParams.get('session')!.trim();
+      }
+
+      // If session provided, verify it exists and is for deviceId
+      if (sessionId) {
+        const sessionRows = await queryDb<{ device_id: string; expires_at: string }>(
+          'SELECT device_id, expires_at FROM pairing_sessions WHERE id = $1',
+          [sessionId]
+        );
+        if (sessionRows.length > 0) {
+          if (new Date(sessionRows[0].expires_at) < new Date()) {
+            sendJson(res, 401, {
+              success: false,
+              error: { code: 'SESSION_EXPIRED', message: 'Pairing session has expired.' },
+            });
+            return;
+          }
+          if (sessionRows[0].device_id !== deviceId) {
+            sendJson(res, 403, {
+              success: false,
+              error: { code: 'SESSION_MISMATCH', message: 'Pairing session does not match target device.' },
+            });
+            return;
+          }
+        }
       }
 
       const redirectUri =
@@ -1794,6 +2049,15 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       }
 
       const stateToken = generateSignedOAuthState(deviceId);
+
+      // Persist state in database for single-use guarantee and session binding
+      await queryDb(
+        `INSERT INTO oauth_states (state, device_id, session_id, expires_at, is_used)
+         VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes', FALSE)
+         ON CONFLICT (state) DO NOTHING`,
+        [stateToken, deviceId, sessionId || null]
+      );
+
       const params = new URLSearchParams({
         client_id: clientId,
         response_type: 'code',
@@ -1815,6 +2079,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         data: {
           authorizationUrl,
           stateToken,
+          sessionId: sessionId || undefined,
         },
       });
       return;
@@ -1824,6 +2089,14 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // 11. POST / GET /api/v1/auth/notion/callback
     // =========================================================================
     if (pathname === '/api/v1/auth/notion/callback') {
+      if (!await checkRateLimit(`oauth_cb:${getClientIp(req)}`, 30, 60000)) {
+        sendJson(res, 429, {
+          success: false,
+          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many callback requests. Please wait.' },
+        });
+        return;
+      }
+
       const code = (req.body?.code as string) || url.searchParams.get('code');
       const state = (req.body?.state as string) || url.searchParams.get('state') || '';
       const redirectUri =
@@ -1843,6 +2116,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
+      // Step 1: Cryptographic HMAC signature check
       const verifiedState = verifySignedOAuthState(state);
       if (!verifiedState.valid || !verifiedState.deviceId) {
         const errorMsg = verifiedState.error || 'Invalid or expired OAuth state parameter.';
@@ -1856,6 +2130,71 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       }
 
       const deviceId = verifiedState.deviceId;
+
+      // Step 2: Database single-use and session binding validation
+      const stateRows = await queryDb<{
+        state: string;
+        device_id: string;
+        session_id: string | null;
+        expires_at: string;
+        is_used: boolean;
+      }>('SELECT * FROM oauth_states WHERE state = $1', [state]);
+
+      if (stateRows.length === 0) {
+        const errorMsg = 'Unknown or unregistered OAuth state parameter.';
+        if (method === 'POST') {
+          sendJson(res, 400, { success: false, error: { code: 'INVALID_STATE', message: errorMsg } });
+          return;
+        }
+        res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(errorMsg)}` });
+        res.end();
+        return;
+      }
+
+      const stateRecord = stateRows[0];
+      if (stateRecord.is_used) {
+        const errorMsg = 'OAuth authorization state has already been redeemed. Replay attack rejected.';
+        if (method === 'POST') {
+          sendJson(res, 400, { success: false, error: { code: 'STATE_ALREADY_USED', message: errorMsg } });
+          return;
+        }
+        res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(errorMsg)}` });
+        res.end();
+        return;
+      }
+
+      if (new Date(stateRecord.expires_at) < new Date()) {
+        const errorMsg = 'OAuth authorization state has expired (15-minute lifespan).';
+        if (method === 'POST') {
+          sendJson(res, 410, { success: false, error: { code: 'STATE_EXPIRED', message: errorMsg } });
+          return;
+        }
+        res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(errorMsg)}` });
+        res.end();
+        return;
+      }
+
+      // Session binding validation if session was associated
+      if (stateRecord.session_id) {
+        const callerSession =
+          getHeader(req, 'authorization')?.startsWith('Bearer ')
+            ? getHeader(req, 'authorization')!.substring(7).trim()
+            : ((req.body?.sessionId as string) || (req.body?.pairingSessionId as string) || url.searchParams.get('session') || null);
+
+        if (callerSession && callerSession !== stateRecord.session_id) {
+          const errorMsg = 'OAuth session mismatch. The state was issued to a different session.';
+          if (method === 'POST') {
+            sendJson(res, 403, { success: false, error: { code: 'SESSION_MISMATCH', message: errorMsg } });
+            return;
+          }
+          res.writeHead(302, { Location: `/?notion_auth=error&message=${encodeURIComponent(errorMsg)}` });
+          res.end();
+          return;
+        }
+      }
+
+      // Mark single-use state as redeemed BEFORE contacting Notion API (anti-race condition)
+      await queryDb('UPDATE oauth_states SET is_used = TRUE, used_at = NOW() WHERE state = $1', [state]);
 
       const clientId = process.env.NOTION_CLIENT_ID;
       const clientSecret = process.env.NOTION_CLIENT_SECRET;

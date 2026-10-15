@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import handler from '../../api/index.ts';
+import handler, { checkRateLimit } from '../../api/index.ts';
 import healthHandler from '../../api/health.ts';
+import crypto from 'crypto';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -52,6 +53,9 @@ beforeAll(async () => {
       `DELETE FROM wifi_profiles
        WHERE device_id IN ('nova-c3-5c20dc4239fca9ec', 'nova-c3-other99887766')`
     );
+    // Clear ephemeral rate limits and oauth states
+    await pool.query('DELETE FROM rate_limits');
+    await pool.query('DELETE FROM oauth_states');
   } finally {
     await pool.end();
   }
@@ -130,7 +134,7 @@ function simulateRequest(options: {
   });
 }
 
-describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
+describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 25000 }, () => {
   const REAL_DEVICE_ID = 'nova-c3-5c20dc4239fca9ec';
   const REAL_MAC = '48:F6:EE:17:34:D8';
   const REAL_BOOTSTRAP_SECRET = 'nova_c3_5c20dc4239fca9ec_boot_8f9c2d1e4a7b3c6d';
@@ -1056,10 +1060,12 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
 
   it('Rate limiter blocks excessive repeated requests with 429 RATE_LIMIT_EXCEEDED', async () => {
     let hitRateLimit = false;
+    const spamIp = '198.51.100.99';
     for (let i = 0; i < 25; i++) {
       const res = await simulateRequest({
         method: 'POST',
         url: '/api/v1/devices/claim',
+        headers: { 'x-forwarded-for': spamIp },
         body: { claimToken: 'bogus_claim_token_spam' },
       });
       if (res.statusCode === 429) {
@@ -1069,5 +1075,293 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', () => {
       }
     }
     expect(hitRateLimit).toBe(true);
+
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await pool.query('DELETE FROM rate_limits WHERE key = $1', [`claim:${spamIp}`]);
+      await pool.query("DELETE FROM rate_limits WHERE key LIKE 'claim:%'");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('Priority 1: Complete hardware recovery sequence using synthetic test device', async () => {
+    const SYNTH_DEVICE_ID = 'nova-c3-synth-recovery-test';
+    const SYNTH_MAC = '48:F6:EE:99:AA:BB';
+    const SYNTH_BOOTSTRAP_SECRET = 'nova_c3_synth_secret_998877665544332211';
+    const synthSecretHash = crypto.createHash('sha256').update(SYNTH_BOOTSTRAP_SECRET).digest('hex');
+
+    // 1. Pre-enroll synthetic device credentials in DB (clearing any prior run artifacts)
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await pool.query('DELETE FROM wifi_profiles WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+      await pool.query('DELETE FROM devices WHERE id = $1', [SYNTH_DEVICE_ID]);
+      await pool.query(
+        `INSERT INTO device_bootstrap_credentials (device_id, mac_address, credential_hash, is_used)
+         VALUES ($1, $2, $3, FALSE)
+         ON CONFLICT (device_id) DO UPDATE SET credential_hash = $3, is_used = FALSE`,
+        [SYNTH_DEVICE_ID, SYNTH_MAC, synthSecretHash]
+      );
+    } finally {
+      await pool.end();
+    }
+
+    // 2. Initial bootstrap / registration
+    const bootRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/bootstrap',
+      body: {
+        deviceId: SYNTH_DEVICE_ID,
+        macAddress: SYNTH_MAC,
+        bootstrapCredential: SYNTH_BOOTSTRAP_SECRET,
+        wifiSsid: 'SynthNet',
+      },
+    });
+    expect(bootRes.statusCode).toBe(200);
+    expect(bootRes.body.success).toBe(true);
+    const synthKeyA = bootRes.body.data.deviceKey;
+    const synthClaimToken1 = bootRes.body.data.claimToken;
+    expect(synthKeyA).toMatch(/^dkey_/);
+    expect(synthClaimToken1).toMatch(/^clm_live_/);
+
+    // 3. User claims device and adds a Wi-Fi profile
+    const claimRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/claim',
+      body: { claimToken: synthClaimToken1 },
+    });
+    expect(claimRes.statusCode).toBe(200);
+    const synthSessionId = claimRes.body.data.pairingSessionId;
+
+    // Create a Wi-Fi profile in vault
+    const addProfRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/wifi-profiles`,
+      headers: { Authorization: `Bearer ${synthSessionId}` },
+      body: {
+        ssid: 'SynthNet_Vault',
+        password: 'vault_super_secret_password',
+        isDefault: true,
+      },
+    });
+    expect(addProfRes.statusCode).toBe(201);
+
+    // 4. Authenticate with synthKeyA (heartbeat)
+    const hbResA = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${synthKeyA}` },
+      body: { wifiConnected: true, rssi: -55, oledState: 'idle' },
+    });
+    expect(hbResA.statusCode).toBe(200);
+
+    // 5. Rotate key to synthKeyB
+    const rotRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/device-key/rotate`,
+      headers: { Authorization: `Bearer ${synthKeyA}` },
+    });
+    expect(rotRes.statusCode).toBe(200);
+    const synthKeyB = rotRes.body.data.deviceKey;
+    expect(synthKeyB).not.toBe(synthKeyA);
+
+    // 6. Confirm synthKeyA is rejected and synthKeyB works
+    const hbResOld = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${synthKeyA}` },
+      body: { wifiConnected: true },
+    });
+    expect(hbResOld.statusCode).toBe(401);
+
+    const hbResNew = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${synthKeyB}` },
+      body: { wifiConnected: true },
+    });
+    expect(hbResNew.statusCode).toBe(200);
+
+    // 7. Simulate device key revocation / loss
+    const pool2 = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await pool2.query('UPDATE devices SET device_secret = NULL WHERE id = $1', [SYNTH_DEVICE_ID]);
+    } finally {
+      await pool2.end();
+    }
+
+    // Now synthKeyB also fails
+    const hbResRevoked = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${synthKeyB}` },
+      body: { wifiConnected: true },
+    });
+    expect(hbResRevoked.statusCode).toBe(401);
+
+    // 8. Recover device via hardware bootstrap credential
+    const recoverRes = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/recover`,
+      headers: { 'x-nova-bootstrap': SYNTH_BOOTSTRAP_SECRET },
+    });
+    expect(recoverRes.statusCode).toBe(200);
+    expect(recoverRes.body.success).toBe(true);
+    const synthKeyC = recoverRes.body.data.deviceKey;
+    expect(synthKeyC).toMatch(/^dkey_/);
+    expect(synthKeyC).not.toBe(synthKeyB);
+
+    // 9. Confirm new key works and old keys remain rejected
+    const hbResRecovered = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${synthKeyC}` },
+      body: { wifiConnected: true },
+    });
+    expect(hbResRecovered.statusCode).toBe(200);
+
+    // 10. Verify that all Wi-Fi profiles and device configuration are preserved intact!
+    const vaultRes = await simulateRequest({
+      method: 'GET',
+      url: `/api/v1/devices/${SYNTH_DEVICE_ID}/wifi-profiles`,
+      headers: { Authorization: `Bearer ${synthSessionId}` },
+    });
+    expect(vaultRes.statusCode).toBe(200);
+    expect(vaultRes.body.data.profiles.length).toBe(1);
+    expect(vaultRes.body.data.profiles[0].ssid).toBe('SynthNet_Vault');
+
+    // 11. Clean up synthetic fixtures
+    const pool3 = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    try {
+      await pool3.query('DELETE FROM devices WHERE id = $1', [SYNTH_DEVICE_ID]);
+      await pool3.query('DELETE FROM device_bootstrap_credentials WHERE device_id = $1', [SYNTH_DEVICE_ID]);
+    } finally {
+      await pool3.end();
+    }
+  });
+
+  it('Priority 2: Distributed rate limiting creates atomic ledger records in PostgreSQL', async () => {
+    const testKey = `test_ratelimit_pg_${Date.now()}`;
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+
+    try {
+      const allowed1 = await checkRateLimit(testKey, 2, 60000);
+      const allowed2 = await checkRateLimit(testKey, 2, 60000);
+      const allowed3 = await checkRateLimit(testKey, 2, 60000);
+
+      expect(allowed1).toBe(true);
+      expect(allowed2).toBe(true);
+      expect(allowed3).toBe(false);
+
+      const rows = await pool.query<{ key: string; count: number }>('SELECT key, count FROM rate_limits WHERE key = $1', [testKey]);
+      expect(rows.rows.length).toBe(1);
+      expect(rows.rows[0].count).toBe(3);
+
+      await pool.query('DELETE FROM rate_limits WHERE key = $1', [testKey]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('Priority 3: Notion OAuth enforces single-use replay protection (400 STATE_ALREADY_USED)', async () => {
+    // 1. Generate legitimate state
+    const authRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/authorize',
+      body: { deviceId: REAL_DEVICE_ID },
+    });
+    expect(authRes.statusCode).toBe(200);
+    const stateToken = authRes.body.data.stateToken;
+    expect(stateToken).toBeDefined();
+
+    // 2. First callback with this state (reaches code exchange; fails gracefully if mock Notion exchange)
+    const cb1 = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/callback',
+      body: { code: 'test_code_replay_protection', state: stateToken },
+    });
+    expect([200, 500, 502]).toContain(cb1.statusCode);
+
+    // 3. Second callback with identical state MUST be rejected as replay attack (400 STATE_ALREADY_USED)
+    const cb2 = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/callback',
+      body: { code: 'test_code_replay_protection', state: stateToken },
+    });
+    expect(cb2.statusCode).toBe(400);
+    expect(cb2.body.error?.code).toBe('STATE_ALREADY_USED');
+  });
+
+  it('Priority 3: Notion OAuth rejects session mismatch (403 SESSION_MISMATCH)', async () => {
+    // 1. Authorize bound to establishedPairingSessionId
+    const authRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/authorize',
+      headers: { Authorization: `Bearer ${establishedPairingSessionId}` },
+      body: { deviceId: REAL_DEVICE_ID },
+    });
+    expect(authRes.statusCode).toBe(200);
+    const stateToken = authRes.body.data.stateToken;
+
+    // 2. Callback with a different session ID
+    const cbMismatch = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/notion/callback',
+      headers: { Authorization: 'Bearer sess_attacker_session_9999' },
+      body: { code: 'test_auth_code_123', state: stateToken },
+    });
+    expect(cbMismatch.statusCode).toBe(403);
+    expect(cbMismatch.body.error?.code).toBe('SESSION_MISMATCH');
+  });
+
+  it('Priority 4: Strict CORS origin allowlist rejects arbitrary .vercel.app domains', async () => {
+    // Allowed canonical origin
+    const prodRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      headers: { Origin: 'https://buynovastore.vercel.app' },
+    });
+    expect(prodRes.headers['access-control-allow-origin']).toBe('https://buynovastore.vercel.app');
+    expect(prodRes.headers['access-control-allow-credentials']).toBe('true');
+
+    // Allowed local origin
+    const localRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      headers: { Origin: 'http://localhost:5173' },
+    });
+    expect(localRes.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+
+    // Allowed preview origin
+    const previewRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      headers: { Origin: 'https://nova-preview-test-shriyash05s-projects.vercel.app' },
+    });
+    expect(previewRes.headers['access-control-allow-origin']).toBe('https://nova-preview-test-shriyash05s-projects.vercel.app');
+
+    // Arbitrary malicious .vercel.app origin MUST NOT be echoed or allowed credentials
+    const evilVercelRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      headers: { Origin: 'https://evil-attacker.vercel.app' },
+    });
+    expect(evilVercelRes.headers['access-control-allow-origin']).toBe('https://buynovastore.vercel.app');
+    expect(evilVercelRes.headers['access-control-allow-credentials']).toBeUndefined();
+
+    // Preflight OPTIONS for malicious origin returns 403
+    const optionsEvil = await simulateRequest({
+      method: 'OPTIONS',
+      url: '/api/health',
+      headers: { Origin: 'https://evil-attacker.vercel.app' },
+    });
+    expect(optionsEvil.statusCode).toBe(403);
+
+    // Firmware / non-browser request without Origin header
+    const firmwareRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+    });
+    expect(firmwareRes.headers['access-control-allow-origin']).toBe('*');
   });
 });

@@ -113,3 +113,28 @@ CREATE TABLE IF NOT EXISTS device_actions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_actions_pending ON device_actions(device_id, status);
+
+-- 8. Shared Distributed Rate Limiting (Serverless & Cold-Start Resilient)
+CREATE TABLE IF NOT EXISTS rate_limits (
+    key VARCHAR(255) PRIMARY KEY,                           -- Action/IP/Device identifier, e.g. 'claim:203.0.113.1'
+    count INTEGER NOT NULL DEFAULT 1,                       -- Request count within current window
+    reset_at TIMESTAMPTZ NOT NULL,                          -- Window expiration timestamp
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_reset_at ON rate_limits(reset_at);
+
+-- 9. Single-Use Session-Bound Notion OAuth State Tokens (Anti-CSRF & Anti-Replay)
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state VARCHAR(128) PRIMARY KEY,                         -- Cryptographic state token with HMAC signature
+    device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    session_id VARCHAR(128),                                -- Bound pairing session ID
+    expires_at TIMESTAMPTZ NOT NULL,                        -- Time-limited expiration (15 minutes)
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,                 -- Single-use guarantee
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_states_device_id ON oauth_states(device_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at);
+
