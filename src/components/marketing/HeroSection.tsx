@@ -66,7 +66,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                 marginBottom: '1.25rem',
               }}
             >
-              Your next interaction starts here.
+              Small enough to carry. Designed to respond.
             </h1>
 
             <p
@@ -78,7 +78,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                 maxWidth: '520px',
               }}
             >
-              NOVA is an ambient voice-assistant keychain engineered around the ESP32-C3 microcontroller, an SSD1306 monochrome OLED, and intended WakeNet voice activation. Connect to your Notion workspace with zero mobile apps.
+              NOVA is an ambient voice-assistant keychain enclosed in a precision transparent enclosure. Engineered around an animated monochrome OLED display, acoustic wake-word spotting, and seamless Notion workspace synchronization.
             </p>
 
             {/* CTAs */}
@@ -92,7 +92,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               }}
             >
               <button
-                onClick={onSignupClick}
+                onClick={onExploreClick}
                 style={{
                   backgroundColor: 'var(--accent-cyan)',
                   color: 'var(--text-on-accent)',
@@ -106,12 +106,12 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                   transition: 'opacity var(--transition-fast)',
                 }}
               >
-                <span>Get Launch Updates</span>
+                <span>Explore NOVA</span>
                 <ArrowRight size={16} />
               </button>
 
               <button
-                onClick={onExploreClick}
+                onClick={onSignupClick}
                 style={{
                   backgroundColor: 'var(--bg-surface)',
                   color: 'var(--text-primary)',
@@ -122,7 +122,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                   fontWeight: 600,
                 }}
               >
-                Explore Experience
+                Get Launch Updates
               </button>
 
               <button
@@ -169,7 +169,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               }}
             >
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'block' }}>
-                <strong style={{ color: 'var(--text-secondary)' }}>Hardware Status Disclosure:</strong> Cloud backend, distributed rate limiting, and encrypted Wi-Fi vault APIs are verified and live. Physical ESP32-C3 firmware capture and end-to-end device integration remain in active prototype development.
+                <strong style={{ color: 'var(--text-secondary)' }}>Hardware Status Disclosure:</strong> Cloud backend, distributed rate limiting, and encrypted Wi-Fi vault APIs are verified and live. Physical enclosure tooling, battery integration (1,000 mAh target), and ESP32 firmware are in active prototype development.
               </span>
             </div>
           </div>
@@ -186,8 +186,8 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               }}
             >
               <img
-                src="/images/nova-concept-hero.jpg"
-                alt="NOVA pocket keychain voice assistant hardware render showing matte graphite chassis, horizontal monochrome OLED with cyan soundwave, and keyring attachment"
+                src="/images/nova-transparent-hero.jpg"
+                alt="NOVA transparent pocket keychain voice assistant concept render showing clear polycarbonate enclosure, exposed internal electronics, 0.96-inch monochrome OLED with cyan pixel smiley face, and metallic keychain loop"
                 width={1280}
                 height={720}
                 loading="eager"
@@ -215,11 +215,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <Cpu size={14} style={{ color: 'var(--accent-cyan)' }} />
                   <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    NOVA Architectural Render
+                    NOVA Prototype Concept Render
                   </span>
                 </div>
                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Graphite Chassis &bull; 128&times;64 OLED &bull; Keyring Loop
+                  Transparent Shell &bull; 0.96&quot; OLED (• ‿ •) &bull; 35&times;50&times;15mm
                 </span>
               </div>
             </div>
@@ -239,10 +239,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Microcontroller
+              Form Factor
             </span>
             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              ESP32-C3 RISC-V @ 160MHz
+              35 &times; 50 &times; 15 mm Keychain
             </span>
           </div>
 
@@ -251,25 +251,25 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               Visual Feedback
             </span>
             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              SSD1306 128&times;64 Monochrome OLED
+              0.96&quot; Monochrome OLED (• ‿ •)
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Acoustic Sensor
+              Microcontroller
             </span>
             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              MAX4466 Electret Microphone
+              ESP32-C3 / S3 (In Evaluation)
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Wi-Fi Provisioning
+              Acoustic Input
             </span>
             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              Local SoftAP (192.168.4.1)
+              MAX4466 Electret Capsule
             </span>
           </div>
         </div>

@@ -12,37 +12,43 @@ const FAQS: FaqItem[] = [
     id: 'availability',
     question: 'Can I purchase or order a physical NOVA device today?',
     answer:
-      'No. NOVA is currently in the bench prototype development phase. We have verified the cloud backend, database schemas, encryption algorithms, and distributed rate limiting, but physical ESP32-C3 firmware capture and injection-molded enclosure production are still in progress. Buy and Setup remain intentionally locked until end-to-end hardware validation is completed.',
+      'No. NOVA is currently in the bench prototype development phase. We have verified the cloud backend, database schemas, encryption algorithms, and distributed rate limiting, but physical ESP32 firmware capture and injection-molded enclosure production are still in progress. Buy and Setup remain intentionally locked until end-to-end hardware validation is completed.',
+  },
+  {
+    id: 'mcu-tradeoff',
+    question: 'Why does the blueprint show an ESP32-S3 while the codebase references the ESP32-C3?',
+    answer:
+      'The initial firmware test harness and API contracts were prototyped around the single-core RISC-V ESP32-C3 Super Mini because of its compact size and ultra-low deep-sleep current. The industrial blueprint features the dual-core Xtensa ESP32-S3 SuperMini to evaluate dedicated vector DSP instructions for accelerating local WakeNet keyword spotting. Microcontroller selection remains an open engineering decision while we benchmark both chips on physical bench boards.',
+  },
+  {
+    id: 'battery-specs',
+    question: 'What is the battery life of the 1,000 mAh Li-Po cell shown on the blueprint?',
+    answer:
+      'The 1,000 mAh 3.7V Li-Po battery pack shown in the blueprint is an unconfirmed prototype target. While an ESP32 in deep-sleep drawing ~5µA theoretically lasts weeks, real runtime depends on microphone ADC duty cycles, Wi-Fi transmit bursts (up to 240mA), and OLED pixel activation. We will publish verified battery metrics only after physical bench testing under calibrated conditions.',
   },
   {
     id: 'custom-hardware',
     question: 'Can I build my own hardware prototype using off-the-shelf parts?',
     answer:
-      'Yes. NOVA is built entirely around standard maker hardware: an ESP32-C3 Super Mini development board, an SSD1306 128×64 monochrome OLED display (I²C 0x3C on GPIO8/GPIO9), and a MAX4466 analog electret microphone amplifier (ADC input GPIO1). Our API contracts, bootstrap hash protocols, and database schemas are open and documented in our repository.',
+      'Yes. NOVA is designed with standard maker hardware: an ESP32 Super Mini development board, an SSD1306 0.96-inch monochrome OLED display (I²C 0x3C on GPIO8/GPIO9), and a MAX4466 analog electret microphone amplifier (ADC input GPIO1). Our API contracts, bootstrap hash protocols, and database schemas are open and documented in our repository.',
   },
   {
     id: 'wifi-compatibility',
     question: 'Does NOVA support 5GHz Wi-Fi networks?',
     answer:
-      'No. The ESP32-C3 SoC contains a 2.4GHz 802.11 b/g/n radio and does not support 5GHz Wi-Fi bands. If your home uses dual-band Wi-Fi, NOVA will connect to the 2.4GHz network. The multi-Wi-Fi vault allows storing up to 5 networks with automatic failover.',
+      'No. The ESP32 SoC contains a 2.4GHz 802.11 b/g/n radio and does not support 5GHz Wi-Fi bands. If your router uses dual-band Wi-Fi, NOVA connects to the 2.4GHz network. The multi-Wi-Fi vault allows storing up to 5 networks with automatic failover.',
   },
   {
     id: 'wake-word',
     question: 'How does wake-word detection work, and does it listen continuously?',
     answer:
-      'Wake-word detection is designed to run locally using Espressif WakeNet keyword spotting ("Hi ESP"). The analog microphone is sampled into a circular memory buffer on the ESP32-C3. Audio packets are only transmitted to the cloud assistant pipeline after the wake word is detected.',
+      'Wake-word detection is designed to run locally using Espressif WakeNet keyword spotting ("Hi ESP"). The analog microphone is sampled into a circular memory buffer on the ESP32. Audio packets are only transmitted to the cloud assistant pipeline after the wake word is detected.',
   },
   {
     id: 'notion-permissions',
     question: 'What access permissions does NOVA require for Notion?',
     answer:
       'NOVA connects via standard Notion OAuth 2.0. You select exactly which pages or databases NOVA has access to during the authorization screen. Access tokens are encrypted at rest with AES-256-GCM envelope encryption, and disconnecting Notion in the web portal immediately revokes access.',
-  },
-  {
-    id: 'battery-specs',
-    question: 'What is the battery life, dimensions, and weight of NOVA?',
-    answer:
-      'We do not publish estimated battery runtimes or finished weight because physical battery capacity and enclosure materials are still undergoing bench qualification. Rather than inventing battery figures or water resistance ratings, we clearly designate physical dimensions as concept specifications until bench testing is certified.',
   },
   {
     id: 'mobile-app',

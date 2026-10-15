@@ -134,7 +134,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
             onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
             onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
           >
-            Hardware Specs
+            Blueprint &amp; Hardware
           </button>
           <button
             onClick={() => scrollToSection('privacy')}
@@ -327,7 +327,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
               padding: '0.5rem 0',
             }}
           >
-            Hardware Specs
+            Blueprint &amp; Hardware
           </button>
           <button
             onClick={() => scrollToSection('privacy')}

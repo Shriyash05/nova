@@ -47,7 +47,7 @@ export const Footer: React.FC<FooterProps> = ({ onEnterDevLab, onOpenLockedModal
               NOVA
             </span>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
-              The ambient voice assistant keychain. Built on ESP32-C3, SSD1306 monochrome OLED, and secure Notion synchronization.
+              The ambient voice assistant keychain. Built on a transparent polycarbonate chassis, monochrome OLED, and secure Notion synchronization.
             </p>
             <div
               style={{
@@ -256,7 +256,7 @@ export const Footer: React.FC<FooterProps> = ({ onEnterDevLab, onOpenLockedModal
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-            <span>ESP32-C3 Firmware v1.0.0-c3</span>
+            <span>ESP32 Firmware Evaluation (v1.0.0-dev)</span>
             <span style={{ color: 'var(--border-subtle)' }}>&bull;</span>
             <span>Production: buynovastore.vercel.app</span>
           </div>

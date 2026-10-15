@@ -1,7 +1,9 @@
-import React from 'react';
-import { Cpu, Terminal, Mic2, Wifi, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Cpu, Terminal, Mic2, Wifi, Layers, ShieldAlert } from 'lucide-react';
 
 export const HardwareSection: React.FC = () => {
+  const [activeBlueprintTab, setActiveBlueprintTab] = useState<'all' | 'exploded' | 'internal' | 'dimensions' | 'lifestyle'>('all');
+
   return (
     <section
       id="hardware"
@@ -13,7 +15,7 @@ export const HardwareSection: React.FC = () => {
     >
       <div className="marketing-container">
         {/* Section Heading */}
-        <div style={{ maxWidth: '640px', marginBottom: '3.5rem' }}>
+        <div style={{ maxWidth: '680px', marginBottom: '3.5rem' }}>
           <span
             style={{
               fontSize: '0.8rem',
@@ -25,7 +27,7 @@ export const HardwareSection: React.FC = () => {
               marginBottom: '0.5rem',
             }}
           >
-            Silicon &amp; Component Architecture
+            Hardware Architecture &amp; Blueprint
           </span>
           <h2
             className="font-display"
@@ -37,14 +39,240 @@ export const HardwareSection: React.FC = () => {
               marginBottom: '1rem',
             }}
           >
-            Verified component specifications.
+            Engineered in clear acrylic. Fully transparent.
           </h2>
           <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            Every component in NOVA is chosen for minimal power consumption, physical compactness, and direct microcontroller-level control.
+            Guided by the official NOVA transparent keychain blueprint. Every sensor, PCB layer, screw boss, and silicon package is exposed to view with zero decorative veneer.
           </p>
         </div>
 
-        {/* 4 Detailed Component Cards */}
+        {/* Blueprint Visual Showcase Box */}
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 'var(--radius-lg)',
+            overflow: 'hidden',
+            marginBottom: '4rem',
+          }}
+        >
+          {/* Blueprint Header Bar */}
+          <div
+            style={{
+              padding: '1rem 1.5rem',
+              backgroundColor: 'var(--bg-surface-elevated)',
+              borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Layers size={16} style={{ color: 'var(--accent-cyan)' }} />
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                NOVA Transparent Keychain Blueprint Reference
+              </span>
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  backgroundColor: 'rgba(0, 242, 254, 0.1)',
+                  color: 'var(--accent-cyan)',
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: 'var(--radius-xs)',
+                  fontWeight: 600,
+                }}
+              >
+                PROTOTYPE CAD
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              <span>Target: 35 &times; 50 &times; 15 mm</span>
+              <span>&bull;</span>
+              <span>M2 Screws</span>
+              <span>&bull;</span>
+              <span>0.96&quot; OLED</span>
+            </div>
+          </div>
+
+          {/* Blueprint Interactive Tab Filter */}
+          <div
+            style={{
+              padding: '0.75rem 1.25rem',
+              backgroundColor: 'var(--bg-surface)',
+              borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.4rem',
+            }}
+          >
+            {[
+              { id: 'all', label: 'All Perspectives' },
+              { id: 'exploded', label: 'Exploded View' },
+              { id: 'internal', label: 'Internal Layout' },
+              { id: 'dimensions', label: 'Dimensions & Cutouts' },
+              { id: 'lifestyle', label: 'Scale & Everyday Carry' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveBlueprintTab(tab.id as any)}
+                style={{
+                  backgroundColor: activeBlueprintTab === tab.id ? 'var(--accent-cyan)' : 'var(--bg-surface-elevated)',
+                  color: activeBlueprintTab === tab.id ? 'var(--text-on-accent)' : 'var(--text-secondary)',
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  transition: 'background-color var(--transition-fast)',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Blueprint Viewer Image */}
+          <div style={{ position: 'relative', backgroundColor: '#05070a' }}>
+            <img
+              src="/images/nova-blueprint-master.jpg"
+              alt="NOVA transparent keychain device technical blueprint depicting front, back, left, right, top, bottom views, exploded component view, internal layout, and mechanical dimensions"
+              width={1024}
+              height={682}
+              loading="lazy"
+              style={{
+                width: '100%',
+                height: 'auto',
+                display: 'block',
+                maxHeight: '620px',
+                objectFit: 'contain',
+              }}
+            />
+
+            {/* Blueprint Overlay Caption */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '1rem',
+                left: '1rem',
+                right: '1rem',
+                backgroundColor: 'rgba(9, 11, 16, 0.88)',
+                backdropFilter: 'blur(6px)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.65rem 1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+              }}
+            >
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                {activeBlueprintTab === 'all' && (
+                  <span><strong style={{ color: 'var(--text-primary)' }}>Full Blueprint:</strong> 6 orthographic views, exploded assembly, internal stack, technical dimensions, in-hand scale, and keychain pocket clip.</span>
+                )}
+                {activeBlueprintTab === 'exploded' && (
+                  <span><strong style={{ color: 'var(--text-primary)' }}>Exploded Assembly:</strong> Front shell &bull; M2 screws &bull; 0.96&quot; OLED &bull; MCU board &bull; MAX4466 mic &bull; 1,000 mAh Li-Po cell &bull; Rear shell.</span>
+                )}
+                {activeBlueprintTab === 'internal' && (
+                  <span><strong style={{ color: 'var(--text-primary)' }}>Internal Architecture:</strong> Component stack showing centered 0.96&quot; OLED displaying pixel smile `• ‿ •`, upper-right mic capsule, and USB-C port at base.</span>
+                )}
+                {activeBlueprintTab === 'dimensions' && (
+                  <span><strong style={{ color: 'var(--text-primary)' }}>Technical Dimensions:</strong> 35.0 mm W &times; 50.0 mm H &times; 15.0 mm D &bull; 2.0 mm screw hole &Oslash; &bull; 5.0 mm boss &Oslash; &bull; 27.0 &times; 20.0 mm OLED cutout.</span>
+                )}
+                {activeBlueprintTab === 'lifestyle' && (
+                  <span><strong style={{ color: 'var(--text-primary)' }}>Scale &amp; Everyday Carry:</strong> Compact pocketable keychain form factor held in a human hand and clipped onto a pocket via a 6mm lanyard ring.</span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                Scale: 1:1 Pocket Keychain
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Microcontroller Silicon Evaluation: C3 vs S3 */}
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '2rem',
+            marginBottom: '3.5rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+            <Cpu size={22} style={{ color: 'var(--accent-cyan)' }} />
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Microcontroller Architecture Evaluation
+            </h3>
+            <span
+              style={{
+                fontSize: '0.7rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                color: 'var(--status-warning)',
+                padding: '0.15rem 0.55rem',
+                borderRadius: 'var(--radius-xs)',
+                fontWeight: 600,
+              }}
+            >
+              ENGINEERING NOTE
+            </span>
+          </div>
+
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem', maxWidth: '780px' }}>
+            Previous repository firmware and backend mock contracts were built around the <strong>ESP32-C3 Super Mini</strong>, while the industrial design blueprint specifies the <strong>ESP32-S3 SuperMini</strong>. Rather than masking this discrepancy, we document the comparative engineering considerations below as an active bench evaluation.
+          </p>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-strong)', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Specification Parameter</th>
+                  <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--accent-cyan)' }}>ESP32-C3 Super Mini (Current Build)</th>
+                  <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--accent-blue)' }}>ESP32-S3 SuperMini (Blueprint Target)</th>
+                  <th style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Architecture Impact</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td style={{ padding: '0.85rem 1rem', fontWeight: 600, color: 'var(--text-primary)' }}>CPU Core &amp; ISA</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Single-core 32-bit RISC-V @ 160 MHz</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Dual-core 32-bit Xtensa LX7 @ 240 MHz</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>S3 provides dual cores for separating audio DSP from Wi-Fi stack</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td style={{ padding: '0.85rem 1rem', fontWeight: 600, color: 'var(--text-primary)' }}>Vector Instructions (DSP)</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Standard integer instructions only</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Dedicated vector instructions (PIE)</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>Vector extensions accelerate WakeNet neural acoustic models</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td style={{ padding: '0.85rem 1rem', fontWeight: 600, color: 'var(--text-primary)' }}>SRAM &amp; Memory</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>400 KB SRAM + 4 MB Flash</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>512 KB SRAM + up to 8 MB Flash</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>S3 offers larger heap margin for circular audio ring-buffers</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td style={{ padding: '0.85rem 1rem', fontWeight: 600, color: 'var(--text-primary)' }}>Active &amp; Sleep Power</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Lower baseline draw (~5 &mu;A deep sleep)</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>Slightly higher draw (~7 &mu;A deep sleep)</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>C3 offers superior standby longevity on keychain batteries</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '0.85rem 1rem', fontWeight: 600, color: 'var(--text-primary)' }}>Implementation Status</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--status-success)', fontWeight: 600 }}>Active in Repo Test Suites &amp; Mock Store</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--status-warning)', fontWeight: 600 }}>Under Bench Evaluation for Production</td>
+                  <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>Both boards share I&sup2;C pin compatibility for SSD1306 and ADC1</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* 4 Core Subsystem Deep-Dive Cards */}
         <div
           style={{
             display: 'grid',
@@ -53,7 +281,7 @@ export const HardwareSection: React.FC = () => {
             marginBottom: '3rem',
           }}
         >
-          {/* Microcontroller */}
+          {/* Enclosure */}
           <div
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -63,18 +291,18 @@ export const HardwareSection: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
-              <Cpu size={20} style={{ color: 'var(--accent-cyan)' }} />
+              <Layers size={20} style={{ color: 'var(--accent-cyan)' }} />
               <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                ESP32-C3 Super Mini
+                Transparent Enclosure
               </h3>
             </div>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              Espressif 32-bit RISC-V single-core processor clocked up to 160MHz. Features 400KB SRAM and 4MB embedded Flash, delivering low active power draw and native hardware cryptographic acceleration.
+              Molded transparent polycarbonate casing with front and rear shells secured by 6 precision M2 machine screws. Features an integrated 6mm stainless lanyard ring and bottom USB-C port cutout.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <div>&bull; <strong>Architecture:</strong> RISC-V RV32IMC @ 160MHz</div>
-              <div>&bull; <strong>Memory:</strong> 400KB SRAM + 4MB Flash</div>
-              <div>&bull; <strong>Hardware Crypto:</strong> SHA-256, AES-128/256, RSA</div>
+              <div>&bull; <strong>Dimensions:</strong> 35.0 &times; 50.0 &times; 15.0 mm</div>
+              <div>&bull; <strong>Fasteners:</strong> M2 Torx (2.0mm hole &bull; 5.0mm boss)</div>
+              <div>&bull; <strong>Carry:</strong> 6mm &Oslash; top keychain / lanyard loop</div>
             </div>
           </div>
 
@@ -90,16 +318,16 @@ export const HardwareSection: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <Terminal size={20} style={{ color: 'var(--accent-blue)' }} />
               <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                SSD1306 Monochrome OLED
+                0.96&quot; Monochrome OLED
               </h3>
             </div>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              0.96-inch high-contrast 128&times;64 pixel OLED screen. Communicates over high-speed hardware I&sup2;C on address 0x3C via GPIO8 (SDA) and GPIO9 (SCL) with zero background backlight power bleed.
+              High-contrast 128&times;64 pixel OLED visible through a 27.0 &times; 20.0 mm window. Emits crisp cyan/white pixel art expressions (`• ‿ •`) and status indicators over I&sup2;C address 0x3C with zero backlight bleed.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <div>&bull; <strong>Resolution:</strong> 128 &times; 64 monochrome pixels</div>
-              <div>&bull; <strong>Bus Interface:</strong> I&sup2;C address 0x3C (GPIO8 / GPIO9)</div>
-              <div>&bull; <strong>Power Draw:</strong> Pixel-emissive (0mA on black)</div>
+              <div>&bull; <strong>Window Cutout:</strong> 27.0 mm &times; 20.0 mm</div>
+              <div>&bull; <strong>Pixel Array:</strong> 128 &times; 64 monochrome pixels</div>
+              <div>&bull; <strong>I&sup2;C Bus:</strong> Address 0x3C (GPIO8 SDA / GPIO9 SCL)</div>
             </div>
           </div>
 
@@ -115,20 +343,20 @@ export const HardwareSection: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <Mic2 size={20} style={{ color: 'var(--accent-cyan)' }} />
               <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                MAX4466 Electret Mic
+                MAX4466 Microphone
               </h3>
             </div>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              Precision operational amplifier optimized for electret microphones. Delivers adjustable gain, excellent power-supply noise rejection, and feeds the ESP32-C3 12-bit ADC input on GPIO1.
+              Precision electret microphone capsule paired with an ultra-low noise op-amp. Located in the upper-right corner with a dedicated acoustic port hole, feeding analog voltage into ADC1 on GPIO1.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <div>&bull; <strong>Transducer:</strong> 20Hz &ndash; 20kHz electret capsule</div>
-              <div>&bull; <strong>ADC Channel:</strong> GPIO1 (SAR ADC1 channel 1)</div>
-              <div>&bull; <strong>Sampling Rate:</strong> 16 kHz 16-bit PCM buffer</div>
+              <div>&bull; <strong>Placement:</strong> Upper-right acoustic inlet</div>
+              <div>&bull; <strong>Audio Sampling:</strong> 16 kHz 16-bit PCM ADC stream</div>
+              <div>&bull; <strong>Wake Engine:</strong> WakeNet offline keyword spotting</div>
             </div>
           </div>
 
-          {/* Radio & SoftAP */}
+          {/* Power & Battery */}
           <div
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -140,21 +368,21 @@ export const HardwareSection: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <Wifi size={20} style={{ color: 'var(--status-success)' }} />
               <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                2.4GHz Wi-Fi &amp; SoftAP
+                Power &amp; Connectivity
               </h3>
             </div>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              Single-band 2.4GHz 802.11 b/g/n radio. Uses local password-protected SoftAP at 192.168.4.1 for secure out-of-band network configuration, blocking cloud network eavesdropping.
+              The blueprint includes a 1,000 mAh Li-Po pouch cell wrapped in protective Kapton film, with a bottom USB-C port for 5V charging and firmware flashing, plus single-band 2.4GHz 802.11b/g/n Wi-Fi.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <div>&bull; <strong>Radio Band:</strong> 2.4 GHz only (802.11 b/g/n)</div>
-              <div>&bull; <strong>Provisioning:</strong> Local SoftAP (192.168.4.1)</div>
-              <div>&bull; <strong>Network Vault:</strong> Multi-network failover (up to 5)</div>
+              <div>&bull; <strong>Battery Target:</strong> 1,000 mAh 3.7V Li-Po (Target)</div>
+              <div>&bull; <strong>Port:</strong> USB-C (Charging + Serial Data)</div>
+              <div>&bull; <strong>Wi-Fi:</strong> 2.4 GHz only (802.11 b/g/n)</div>
             </div>
           </div>
         </div>
 
-        {/* Honest Disclosure: Concept vs Verified Specs */}
+        {/* Unconfirmed Specifications Disclosure */}
         <div
           style={{
             backgroundColor: 'var(--bg-surface-elevated)',
@@ -166,13 +394,13 @@ export const HardwareSection: React.FC = () => {
             alignItems: 'flex-start',
           }}
         >
-          <AlertCircle size={22} style={{ color: 'var(--status-warning)', flexShrink: 0, marginTop: '2px' }} />
+          <ShieldAlert size={22} style={{ color: 'var(--status-warning)', flexShrink: 0, marginTop: '2px' }} />
           <div>
             <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
-              Concept Specifications vs Verified Silicon
+              Unconfirmed Concept Specifications Disclosure
             </h4>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-              The electronic components above are <strong>verified prototype specifications</strong> currently tested on bench boards. In contrast, mechanical enclosure dimensions, exact finished weight, battery cell capacity, run time between charges, water resistance ratings, and regulatory certifications (FCC/CE) are <strong>unverified concept targets</strong>. We will publish certified measurements only after physical production tooling is completed.
+              The cloud backend, database schemas, encryption algorithms, and distributed rate limiting are <strong>fully verified in code and live tests</strong>. However, the blueprint&apos;s 1,000 mAh battery operating hours, charging IC thermal profile, final enclosure drop-test durability, and physical ESP32-S3 vs C3 production selection remain <strong>unconfirmed prototype specifications</strong>. Certified metrics will be published only after physical bench testing of assembled prototypes is complete.
             </p>
           </div>
         </div>
