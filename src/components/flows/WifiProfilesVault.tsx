@@ -76,8 +76,30 @@ export const WifiProfilesVault: React.FC<WifiProfilesVaultProps> = ({
   }, [deviceId, authToken]);
 
   useEffect(() => {
-    fetchProfiles();
-  }, [fetchProfiles]);
+    let ignore = false;
+    apiClient
+      .getWifiProfiles(deviceId, authToken)
+      .then((res) => {
+        if (!ignore) {
+          if (res.success && res.data) {
+            setProfiles(res.data.profiles);
+            setVaultVersion(res.data.vaultVersion);
+          } else {
+            setErrorMessage(res.error?.message || 'Failed to load Wi-Fi profile vault.');
+          }
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setErrorMessage(err instanceof Error ? err.message : 'Network error loading profiles.');
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [deviceId, authToken]);
 
   const handleOpenAddModal = () => {
     setFormName(`Network ${profiles.length + 1}`);
