@@ -29,11 +29,17 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
     setLoading(true);
     setErrorMsg('');
 
+    const redirectUrl =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? `${window.location.origin}/`
+        : 'https://buynovastore.vercel.app/';
+
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/`,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
