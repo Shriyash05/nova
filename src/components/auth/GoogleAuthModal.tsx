@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ShieldCheck, AlertCircle, Key, ExternalLink, Loader2 } from 'lucide-react';
+import { X, ShieldCheck, AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { apiClient } from '../../api/client';
 
 export interface GoogleAuthModalProps {
@@ -44,51 +44,44 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const envClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string) || '';
-  const [customClientId, setCustomClientId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('nova_google_client_id') || '';
-    }
-    return '';
-  });
-
-  const activeClientId = envClientId.trim() || customClientId.trim();
+  const activeClientId = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string) || '').trim();
 
   const [loading, setLoading] = useState(false);
   const [gsiReady, setGsiReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [clientIdInput, setClientIdInput] = useState(customClientId);
-  const [showConfig, setShowConfig] = useState(!activeClientId);
 
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
-  const handleCredentialResponse = React.useCallback(async (response: { credential: string }) => {
-    if (!response.credential) {
-      setErrorMsg('No credential returned by Google Identity Services.');
-      return;
-    }
-
-    setLoading(true);
-    setErrorMsg('');
-
-    try {
-      const res = await apiClient.loginWithGoogle({
-        credential: response.credential,
-      });
-
-      if (res.success && res.data?.user) {
-        onSuccess(res.data.user);
-        onClose();
-      } else {
-        setErrorMsg(res.error?.message || 'Google token verification failed on server.');
+  const handleCredentialResponse = React.useCallback(
+    async (response: { credential: string }) => {
+      if (!response.credential) {
+        setErrorMsg('No credential returned by Google Identity Services.');
+        return;
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Network error during Google authentication.';
-      setErrorMsg(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [onSuccess, onClose]);
+
+      setLoading(true);
+      setErrorMsg('');
+
+      try {
+        const res = await apiClient.loginWithGoogle({
+          credential: response.credential,
+        });
+
+        if (res.success && res.data?.user) {
+          onSuccess(res.data.user);
+          onClose();
+        } else {
+          setErrorMsg(res.error?.message || 'Google token verification failed on server.');
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Network error during Google authentication.';
+        setErrorMsg(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onSuccess, onClose]
+  );
 
   // Check for window.google script availability
   useEffect(() => {
@@ -125,7 +118,6 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
         cancel_on_tap_outside: false,
       });
 
-      // Clear previous container child nodes before rendering
       googleButtonRef.current.innerHTML = '';
 
       window.google!.accounts.id.renderButton(googleButtonRef.current, {
@@ -142,20 +134,6 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
       setTimeout(() => setErrorMsg(msg), 0);
     }
   }, [isOpen, gsiReady, activeClientId, handleCredentialResponse]);
-
-  const handleSaveClientId = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleaned = clientIdInput.trim();
-    if (!cleaned || !cleaned.includes('.apps.googleusercontent.com')) {
-      setErrorMsg('Client ID must be in format: <your-app-id>.apps.googleusercontent.com');
-      return;
-    }
-
-    setErrorMsg('');
-    localStorage.setItem('nova_google_client_id', cleaned);
-    setCustomClientId(cleaned);
-    setShowConfig(false);
-  };
 
   if (!isOpen) return null;
 
@@ -175,7 +153,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
           border: '3px solid #000000',
           boxShadow: '8px 8px 0px #000000',
           borderRadius: 'var(--radius-lg)',
-          maxWidth: '480px',
+          maxWidth: '460px',
           width: '92%',
           padding: '2.25rem 2rem',
           position: 'relative',
@@ -289,7 +267,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
         )}
 
         {/* Real Google Button Container */}
-        {!loading && activeClientId && !showConfig && (
+        {!loading && activeClientId && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
             <div
               ref={googleButtonRef}
@@ -304,110 +282,35 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
             {!gsiReady && (
               <div style={{ fontSize: '0.85rem', color: '#666', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <Loader2 size={14} className="spin-animate" />
-                <span>Loading Google Identity Services SDK...</span>
+                <span>Connecting to Google Identity Services...</span>
               </div>
             )}
-
-            <button
-              onClick={() => setShowConfig(true)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#666',
-                fontSize: '0.78rem',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                marginTop: '0.25rem',
-              }}
-            >
-              Change OAuth Client ID ({activeClientId.substring(0, 16)}...)
-            </button>
           </div>
         )}
 
-        {/* Configuration View: If no Google Client ID is configured yet */}
-        {!loading && (showConfig || !activeClientId) && (
-          <form onSubmit={handleSaveClientId} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div
-              style={{
-                backgroundColor: '#F7F7F7',
-                border: '1.5px solid #DDD',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.85rem',
-                fontSize: '0.82rem',
-                lineHeight: 1.5,
-                color: '#444',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 800, color: '#000', marginBottom: '0.35rem' }}>
-                <Key size={14} />
-                <span>Google OAuth 2.0 Client ID</span>
-              </div>
-              <div>
-                To trigger authentic Google account popups, configure your Google Cloud Web Client ID:
-              </div>
-              <a
-                href="https://console.cloud.google.com/apis/credentials"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  color: '#1A73E8',
-                  fontWeight: 700,
-                  marginTop: '0.35rem',
-                  textDecoration: 'none',
-                }}
-              >
-                <span>Open Google Cloud Credentials Console</span>
-                <ExternalLink size={12} />
-              </a>
+        {/* Notice if VITE_GOOGLE_CLIENT_ID is not configured in environment */}
+        {!loading && !activeClientId && (
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card-cream)',
+              border: '2px solid #000000',
+              boxShadow: '3px 3px 0px #000000',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.25rem',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#FF9F1C', marginBottom: '0.5rem' }}>
+              <Sparkles size={16} />
+              <strong style={{ color: '#000', fontSize: '0.95rem' }}>OAuth Client Deployment</strong>
             </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                Google Web Client ID
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="xxxxxxxxxxxx-xxxxxxxx.apps.googleusercontent.com"
-                value={clientIdInput}
-                onChange={(e) => setClientIdInput(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem 1rem',
-                  border: '2px solid #000',
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: '2px 2px 0px #000',
-                  fontSize: '0.88rem',
-                  fontFamily: 'var(--font-mono)',
-                  outline: 'none',
-                }}
-              />
+            <p style={{ fontSize: '0.88rem', color: '#555', margin: '0 0 1rem', lineHeight: 1.5 }}>
+              Google Sign-In is configured via Vercel environment variables (<code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', backgroundColor: '#EEE', padding: '0.15rem 0.35rem', borderRadius: '4px' }}>VITE_GOOGLE_CLIENT_ID</code>).
+            </p>
+            <div style={{ fontSize: '0.8rem', color: '#777' }}>
+              Add your Google Cloud Web Client ID in the Vercel Dashboard to activate for all visitors.
             </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              {activeClientId && (
-                <button
-                  type="button"
-                  onClick={() => setShowConfig(false)}
-                  className="btn-brutal btn-brutal-white"
-                  style={{ flex: 1, padding: '0.75rem' }}
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                type="submit"
-                className="btn-brutal btn-brutal-amber"
-                style={{ flex: 2, padding: '0.75rem', fontSize: '0.92rem' }}
-              >
-                Activate Google Sign-In
-              </button>
-            </div>
-          </form>
+          </div>
         )}
 
         {/* Security & Compliance Footer */}
