@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, Radio, Database, LogOut, CheckCircle2, Mic, RefreshCw, Cpu, Layers } from 'lucide-react';
+import { Wifi, Radio, Database, LogOut, CheckCircle2, Mic, RefreshCw, Cpu, Layers, ExternalLink, AlertTriangle } from 'lucide-react';
 import { apiClient } from '../../api/client';
 
 export interface CompanionDashboardProps {
@@ -24,6 +24,46 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [notionSyncing, setNotionSyncing] = useState(false);
+  const [notionConnecting, setNotionConnecting] = useState(false);
+  const [notionConnected, setNotionConnected] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('notion_auth') === 'success') return true;
+      return localStorage.getItem('nova_notion_connected') === 'true';
+    }
+    return false;
+  });
+  const [notionWorkspace, setNotionWorkspace] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('notion_auth') === 'success') {
+        return p.get('workspace') || 'Notion Workspace';
+      }
+      return localStorage.getItem('nova_notion_workspace') || null;
+    }
+    return null;
+  });
+  const [notionBanner, setNotionBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('notion_auth') === 'success') {
+        const ws = p.get('workspace') || 'Notion Workspace';
+        return {
+          type: 'success',
+          message: `🎉 Connected to Notion workspace: "${ws}"! Voice memos will automatically sync to your database.`,
+        };
+      }
+      if (p.get('notion_auth') === 'error') {
+        const msg = p.get('message') || 'Authorization cancelled';
+        return {
+          type: 'error',
+          message: `❌ Notion connection could not be completed: ${msg}`,
+        };
+      }
+    }
+    return null;
+  });
+
   const [memos, setMemos] = useState<{ id: string; title: string; time: string; status: string }[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('nova_synced_memos');
@@ -37,6 +77,44 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     }
     return [];
   });
+
+  // Clean URL params after Notion callback redirect
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.has('notion_auth')) {
+        if (p.get('notion_auth') === 'success') {
+          const ws = p.get('workspace') || 'Notion Workspace';
+          localStorage.setItem('nova_notion_connected', 'true');
+          localStorage.setItem('nova_notion_workspace', ws);
+        }
+        p.delete('notion_auth');
+        p.delete('workspace');
+        p.delete('deviceId');
+        p.delete('message');
+        const clean = window.location.pathname + (p.toString() ? `?${p.toString()}` : '');
+        window.history.replaceState(null, '', clean);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) {
+      apiClient.getUserDevices(user.id).then((res) => {
+        if (res.success && res.data?.devices) {
+          const dev = res.data.devices.find((d) => d.id === activeDeviceId);
+          if (dev?.notion_authorized) {
+            setNotionConnected(true);
+            setNotionWorkspace(dev.notion_workspace || 'Connected Notion Space');
+            localStorage.setItem('nova_notion_connected', 'true');
+            if (dev.notion_workspace) {
+              localStorage.setItem('nova_notion_workspace', dev.notion_workspace);
+            }
+          }
+        }
+      }).catch(() => null);
+    }
+  }, [user, activeDeviceId]);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -217,8 +295,89 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     }
   };
 
+  const handleConnectNotion = async () => {
+    setNotionConnecting(true);
+    try {
+      const redirectUri = typeof window !== 'undefined'
+        ? `${window.location.origin}/?page=dashboard`
+        : 'https://buynovastore.vercel.app/?page=dashboard';
+      const res = await apiClient.authorizeNotion({
+        deviceId: activeDeviceId,
+        redirectUri,
+      });
+      if (res.success && res.data?.authorizationUrl) {
+        window.location.href = res.data.authorizationUrl;
+      } else {
+        alert(res.error?.message || 'Failed to initialize Notion authorization.');
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error connecting to Notion.');
+    } finally {
+      setNotionConnecting(false);
+    }
+  };
+
+  const handleDisconnectNotion = async () => {
+    if (!window.confirm('Disconnect your Notion workspace from NOVA?')) return;
+    try {
+      await apiClient.disconnectNotion(activeDeviceId, { confirm: true, revokeToken: true });
+      setNotionConnected(false);
+      setNotionWorkspace(null);
+      localStorage.removeItem('nova_notion_connected');
+      localStorage.removeItem('nova_notion_workspace');
+      setNotionBanner({
+        type: 'success',
+        message: 'Notion workspace disconnected successfully.',
+      });
+    } catch (err) {
+      console.error('Failed to disconnect Notion:', err);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '1060px', margin: '0 auto', padding: '2rem 1.25rem 5rem' }}>
+      {/* Notion Status Banner */}
+      {notionBanner && (
+        <div
+          style={{
+            backgroundColor: notionBanner.type === 'success' ? '#E8F9F1' : '#FDE8E8',
+            border: `2px solid ${notionBanner.type === 'success' ? '#27AE60' : '#E74C3C'}`,
+            borderRadius: 'var(--radius-sm)',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '3px 3px 0px #000',
+            fontWeight: 700,
+            fontSize: '0.92rem',
+            color: '#000000',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            {notionBanner.type === 'success' ? (
+              <CheckCircle2 size={18} color="#27AE60" />
+            ) : (
+              <AlertTriangle size={18} color="#E74C3C" />
+            )}
+            <span>{notionBanner.message}</span>
+          </div>
+          <button
+            onClick={() => setNotionBanner(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 900,
+              fontSize: '1rem',
+              color: '#000',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Header Card */}
       <div
         className="card-brutal"
@@ -471,66 +630,204 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
               padding: '1.75rem',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Database size={18} color="#FF9F1C" />
-                <h2 style={{ fontSize: '1.15rem', fontWeight: 900 }}>Notion Sync Hub</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Database size={20} color="#FF9F1C" />
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 900 }}>Notion Sync Hub</h2>
               </div>
 
-              <button
-                onClick={handleTriggerSync}
-                disabled={notionSyncing}
-                className="btn-brutal btn-brutal-amber"
-                style={{ padding: '0.4rem 0.85rem', fontSize: '0.78rem' }}
-              >
-                <RefreshCw size={13} className={notionSyncing ? 'spin' : ''} />
-                <span>{notionSyncing ? 'Capturing...' : 'Test Voice Memo'}</span>
-              </button>
+              {notionConnected ? (
+                <span
+                  style={{
+                    backgroundColor: '#4ECCA3',
+                    border: '1.5px solid #000',
+                    padding: '0.2rem 0.65rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.75rem',
+                    fontWeight: 900,
+                    boxShadow: '1.5px 1.5px 0px #000',
+                  }}
+                >
+                  CONNECTED
+                </span>
+              ) : (
+                <span
+                  style={{
+                    backgroundColor: '#FFAEC8',
+                    border: '1.5px solid #000',
+                    padding: '0.2rem 0.65rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.75rem',
+                    fontWeight: 900,
+                    boxShadow: '1.5px 1.5px 0px #000',
+                  }}
+                >
+                  NOT CONNECTED
+                </span>
+              )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {memos.length > 0 ? (
-                memos.map((memo) => (
-                  <div
-                    key={memo.id}
-                    style={{
-                      backgroundColor: '#FFF',
-                      border: '1.5px solid #000',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '0.65rem 0.85rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <CheckCircle2 size={15} color="#27AE60" />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{memo.title}</span>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>{memo.time}</span>
-                  </div>
-                ))
-              ) : (
+            {!notionConnected ? (
+              /* Notion Not Connected State: Prominent Connect Action */
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  border: '2px solid #000000',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '1.5rem',
+                  boxShadow: '3px 3px 0px #000',
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '12px',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 1rem',
+                    fontSize: '1.4rem',
+                    fontWeight: 900,
+                    fontFamily: 'serif',
+                    boxShadow: '2.5px 2.5px 0px #FFAEC8',
+                  }}
+                >
+                  N
+                </div>
+
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 900, marginBottom: '0.5rem' }}>
+                  Connect Your Notion Workspace
+                </h3>
+                <p style={{ color: '#555', fontSize: '0.88rem', lineHeight: 1.5, marginBottom: '1.25rem', maxWidth: '380px', margin: '0 auto 1.25rem' }}>
+                  Sync voice memos, thoughts, and tasks automatically from your NOVA keychain directly into your designated Notion database.
+                </p>
+
+                <button
+                  onClick={handleConnectNotion}
+                  disabled={notionConnecting}
+                  className="btn-brutal btn-brutal-black"
+                  style={{
+                    width: '100%',
+                    padding: '0.85rem 1.25rem',
+                    fontSize: '0.95rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <ExternalLink size={16} color="#00F2FE" />
+                  <span>{notionConnecting ? 'Redirecting to Notion...' : 'Connect Notion Workspace'}</span>
+                </button>
+              </div>
+            ) : (
+              /* Notion Connected State */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div
                   style={{
                     backgroundColor: '#FFFFFF',
-                    border: '1.5px dashed #BBB',
+                    border: '1.5px solid #000',
                     borderRadius: 'var(--radius-sm)',
-                    padding: '1.5rem',
-                    textAlign: 'center',
-                    color: '#666',
-                    fontSize: '0.88rem',
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem',
+                    boxShadow: '2px 2px 0px #000',
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#000', marginBottom: '0.25rem' }}>
-                    No voice memos synced yet
-                  </div>
                   <div>
-                    Say "Hi ESP" to your physical NOVA keychain to capture and sync your first note directly to Notion, or click "Test Voice Memo" above.
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#666', textTransform: 'uppercase' }}>
+                      Linked Workspace
+                    </div>
+                    <div style={{ fontWeight: 900, fontSize: '0.95rem' }}>
+                      {notionWorkspace || 'Notion Workspace'}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#27AE60', fontWeight: 700 }}>
+                      Target: NOVA Notes &amp; Voice Inbox
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button
+                      onClick={handleTriggerSync}
+                      disabled={notionSyncing}
+                      className="btn-brutal btn-brutal-amber"
+                      style={{ padding: '0.45rem 0.85rem', fontSize: '0.78rem' }}
+                    >
+                      <RefreshCw size={13} className={notionSyncing ? 'spin' : ''} />
+                      <span>{notionSyncing ? 'Syncing...' : 'Test Voice Memo'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleDisconnectNotion}
+                      style={{
+                        backgroundColor: '#FFF0F0',
+                        color: '#D63031',
+                        border: '1.5px solid #000',
+                        padding: '0.45rem 0.85rem',
+                        borderRadius: 'var(--radius-sm)',
+                        fontWeight: 800,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Disconnect
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {memos.length > 0 ? (
+                    memos.map((memo) => (
+                      <div
+                        key={memo.id}
+                        style={{
+                          backgroundColor: '#FFF',
+                          border: '1.5px solid #000',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '0.65rem 0.85rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <CheckCircle2 size={15} color="#27AE60" />
+                          <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{memo.title}</span>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>{memo.time}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        border: '1.5px dashed #BBB',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '1.25rem',
+                        textAlign: 'center',
+                        color: '#666',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: '#000', marginBottom: '0.2rem' }}>
+                        No voice memos synced yet
+                      </div>
+                      <div>
+                        Say "Hi ESP" to your physical NOVA keychain to capture your first note directly into Notion, or click "Test Voice Memo" above.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

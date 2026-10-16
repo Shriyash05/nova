@@ -140,19 +140,52 @@ export const AutoConnectExperience: React.FC<AutoConnectExperienceProps> = ({
 
     try {
       // Send Wi-Fi credentials to ESP32 local web server on 192.168.4.1
-      await fetch('http://192.168.4.1/api/wifi', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          ssid: wifiSsid.trim(),
-          password: wifiPass,
-        }).toString(),
-      }).catch(() => null);
+      let postDevId: string | null = null;
+      try {
+        const res = await fetch('http://192.168.4.1/api/wifi', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ssid: wifiSsid.trim(),
+            password: wifiPass,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.deviceId) {
+            postDevId = data.deviceId;
+            setDetectedDevId(data.deviceId);
+          }
+        }
+      } catch {
+        // Fallback: send as form urlencoded
+        try {
+          const formRes = await fetch('http://192.168.4.1/api/wifi', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+              ssid: wifiSsid.trim(),
+              password: wifiPass,
+            }).toString(),
+          });
+          if (formRes.ok) {
+            const data = await formRes.json().catch(() => null);
+            if (data?.deviceId) {
+              postDevId = data.deviceId;
+              setDetectedDevId(data.deviceId);
+            }
+          }
+        } catch {
+          // Ignore network switch transition
+        }
+      }
 
       // Link to user account
-      const devToLink = detectedDevId || 'nova-c3-5c20dc4239fca9ec';
+      const devToLink = postDevId || detectedDevId || 'nova-c3-5c20dc4239fca9ec';
       await apiClient.linkUserDevice(user.id, devToLink, 'My NOVA Keychain').catch(() => null);
       localStorage.setItem('nova_active_device_id', devToLink);
       setLinkedSuccess(true);

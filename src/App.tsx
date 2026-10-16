@@ -40,6 +40,9 @@ export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<'home' | 'dashboard' | 'connect' | 'story'>(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
+      if (p.get('notion_auth')) {
+        return 'dashboard';
+      }
       const pageParam = p.get('page');
       if (pageParam === 'dashboard' || pageParam === 'connect' || pageParam === 'story') {
         return pageParam;
@@ -56,8 +59,7 @@ export const App: React.FC = () => {
         p.get('token') ||
         p.get('claim_token') ||
         p.get('short_code') ||
-        p.get('notion_auth') ||
-        p.get('setup')
+        p.get('setup') === 'true'
       ) {
         return 'device_lab';
       }
