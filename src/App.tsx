@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './styles/global.css';
 import './styles/components.css';
+import { supabase } from './lib/supabase';
+import { apiClient } from './api/client';
 
 // Navigation & Marketing Sections
 import { Navbar } from './components/marketing/Navbar';
@@ -78,6 +80,50 @@ export const App: React.FC = () => {
     return null;
   });
 
+  // Supabase Auth Session Synchronization
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const u: UserProfile = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || null,
+          avatar_url: session.user.user_metadata?.avatar_url || null,
+        };
+        setUser(u);
+        localStorage.setItem('nova_user_profile', JSON.stringify(u));
+        localStorage.setItem('nova_user_id', u.id);
+        if (session.access_token) {
+          apiClient.setSessionToken(session.access_token);
+        }
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const u: UserProfile = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || null,
+          avatar_url: session.user.user_metadata?.avatar_url || null,
+        };
+        setUser(u);
+        localStorage.setItem('nova_user_profile', JSON.stringify(u));
+        localStorage.setItem('nova_user_id', u.id);
+        if (session.access_token) {
+          apiClient.setSessionToken(session.access_token);
+        }
+        if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const [googleAuthOpen, setGoogleAuthOpen] = useState(false);
   const [waitlistModalOpen, setWaitlistModalOpen] = useState(false);
   const [waitlistTier, setWaitlistTier] = useState<'maker' | 'keychain' | 'twin'>('keychain');
@@ -102,15 +148,23 @@ export const App: React.FC = () => {
     setWaitlistModalOpen(true);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut().catch(() => {});
     localStorage.removeItem('nova_user_profile');
     localStorage.removeItem('nova_user_id');
     localStorage.removeItem('nova_session_token');
+    apiClient.setSessionToken(null);
     setUser(null);
   };
 
-  const handleDisconnectDevice = () => {
-    // Notify and redirect to zero-touch connect screen
+  const handleDisconnectDevice = async () => {
+    const activeDeviceId = (typeof window !== 'undefined' && localStorage.getItem('nova_active_device_id')) || 'nova-c3-5c20dc4239fca9ec';
+    if (user?.id) {
+      await apiClient.unlinkUserDevice(activeDeviceId).catch(() => {});
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('nova_active_device_id');
+    }
     handleNavigate('connect');
   };
 

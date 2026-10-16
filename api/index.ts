@@ -293,6 +293,43 @@ export async function getUserIdFromSession(token: string): Promise<string | null
     // If table doesn't exist yet, return null
   }
 
+  // 2. Supabase Auth JWT inspection (Bearer session.access_token)
+  if (token.includes('.') && token.split('.').length === 3) {
+    try {
+      const parts = token.split('.');
+      const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+      const payload = JSON.parse(payloadJson);
+      if (payload.sub && typeof payload.sub === 'string') {
+        // Check expiration
+        if (!payload.exp || payload.exp * 1000 > Date.now()) {
+          // Ensure user record exists in users table
+          try {
+            await queryDb(
+              `INSERT INTO users (id, email, name, avatar_url, updated_at)
+               VALUES ($1, $2, $3, $4, NOW())
+               ON CONFLICT (id) DO UPDATE SET
+                 email = COALESCE(EXCLUDED.email, users.email),
+                 name = COALESCE(EXCLUDED.name, users.name),
+                 avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+                 updated_at = NOW()`,
+              [
+                payload.sub,
+                payload.email || null,
+                payload.user_metadata?.full_name || payload.user_metadata?.name || null,
+                payload.user_metadata?.avatar_url || null,
+              ]
+            );
+          } catch {
+            // Non-fatal if users table not yet created
+          }
+          return payload.sub;
+        }
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
   return null;
 }
 
