@@ -59,6 +59,55 @@ export interface CreateClaimTokenResult {
 export interface ClaimDevicePayload {
   claimToken?: string;
   shortCode?: string;
+  deviceId?: string;
+  userId?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  google_id: string | null;
+}
+
+export interface GoogleAuthPayload {
+  credential?: string;
+  email?: string;
+  name?: string;
+  avatarUrl?: string;
+  googleId?: string;
+}
+
+export interface GoogleAuthResult {
+  user: UserProfile;
+  sessionToken: string;
+}
+
+export interface UserRegisteredDevice {
+  id: string;
+  serial_number: string;
+  mac_address: string;
+  hardware_model: string;
+  firmware_version: string;
+  status: string;
+  ip_address: string | null;
+  wifi_connected: boolean | null;
+  wifi_ssid: string | null;
+  wifi_rssi: number | null;
+  oled_state: string | null;
+  queue_count: number | null;
+  last_heartbeat: string | null;
+  label: string;
+  is_primary: boolean;
+  linked_at: string;
+  notion_workspace: string | null;
+  notion_authorized: boolean;
+}
+
+export interface UserDevicesResult {
+  userId: string;
+  devices: UserRegisteredDevice[];
 }
 
 export interface ClaimDeviceResult {

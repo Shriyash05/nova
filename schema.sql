@@ -149,3 +149,29 @@ CREATE TABLE IF NOT EXISTS launch_subscribers (
 
 CREATE INDEX IF NOT EXISTS idx_launch_subscribers_email ON launch_subscribers(email);
 
+-- 11. User Accounts (Google OAuth / Single Sign-On)
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(64) PRIMARY KEY,                             -- e.g. 'usr_c0384a8219bf'
+    email VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(255),
+    avatar_url TEXT,
+    google_id VARCHAR(128) UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- 12. User Devices (Associates claimed physical devices with a user account)
+CREATE TABLE IF NOT EXISTS user_devices (
+    user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id VARCHAR(64) NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    label VARCHAR(64) DEFAULT 'My NOVA Keychain',
+    is_primary BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, device_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_devices_device ON user_devices(device_id);
+

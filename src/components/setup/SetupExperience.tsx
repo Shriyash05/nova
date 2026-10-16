@@ -13,9 +13,13 @@ import {
   LogOut,
   ChevronDown,
   ChevronUp,
+  Camera,
+  CheckCircle2,
+  ChevronRight,
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
-import type { WifiProfile } from '../../api/types';
+import type { WifiProfile, UserProfile, UserRegisteredDevice } from '../../api/types';
+import { QrCameraScannerModal } from './QrCameraScannerModal';
 
 interface SetupExperienceProps {
   onBackToWebsite: () => void;
@@ -72,6 +76,25 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
   const [syncTestRunning, setSyncTestRunning] = useState<boolean>(false);
   const [syncTestResult, setSyncTestResult] = useState<string | null>(null);
 
+  // User Authentication & Linked Devices
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('nova_user_profile');
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  });
+  const [userDevices, setUserDevices] = useState<UserRegisteredDevice[]>([]);
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState<boolean>(false);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [showDeviceSelector, setShowDeviceSelector] = useState<boolean>(false);
+
   // ---------------------------------------------------------------------------
   // Load Device Status
   // ---------------------------------------------------------------------------
@@ -112,13 +135,65 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
     }
   }, []);
 
+  const fetchUserDevices = useCallback(async (userId?: string) => {
+    const uid = userId || currentUser?.id;
+    if (!uid) return;
+    try {
+      const res = await apiClient.getUserDevices(uid);
+      if (res.success && res.data?.devices) {
+        setUserDevices(res.data.devices);
+      }
+    } catch (err) {
+      console.error('Error fetching user devices:', err);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      const timer = setTimeout(() => {
+        void fetchUserDevices(currentUser.id);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [currentUser?.id, fetchUserDevices]);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      const res = await apiClient.loginWithGoogle({
+        email: 'shriyash@buynova.store',
+        name: 'Shriyash',
+        googleId: 'google_user_shriyash',
+      });
+      if (res.success && res.data?.user) {
+        setCurrentUser(res.data.user);
+        await fetchUserDevices(res.data.user.id);
+      }
+    } catch (err) {
+      console.error('Google login failed:', err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleSelectDevice = async (selectedDeviceId: string) => {
+    setDeviceId(selectedDeviceId);
+    localStorage.setItem('nova_paired_device_id', selectedDeviceId);
+    if (sessionToken) {
+      await fetchDeviceStatus(selectedDeviceId, sessionToken);
+    } else {
+      await handleClaimDevice(selectedDeviceId);
+    }
+    setShowDeviceSelector(false);
+  };
+
   // ---------------------------------------------------------------------------
   // Handle Device Claiming
   // ---------------------------------------------------------------------------
   const handleClaimDevice = useCallback(async (tokenToClaim?: string) => {
     const rawToken = (tokenToClaim || claimInput).trim();
     if (!rawToken) {
-      setClaimError('Please provide a claim token or pairing code from the OLED screen.');
+      setClaimError('Please provide a claim token, QR code, or device ID from your OLED.');
       return;
     }
 
@@ -126,7 +201,11 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
     setClaimError(null);
 
     try {
-      const res = await apiClient.claimDevice({ claimToken: rawToken });
+      const res = await apiClient.claimDevice({
+        claimToken: rawToken,
+        deviceId: rawToken,
+        userId: currentUser?.id,
+      });
       if (res.success && res.data) {
         const { pairingSessionId, deviceId: pairedId } = res.data;
         apiClient.setSessionToken(pairingSessionId);
@@ -136,6 +215,11 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
 
         // Fetch full status
         await fetchDeviceStatus(pairedId, pairingSessionId);
+
+        // Refresh linked devices if logged in
+        if (currentUser?.id) {
+          void fetchUserDevices(currentUser.id);
+        }
       } else {
         setClaimError(res.error?.message || 'Failed to claim device. Verify token on OLED screen.');
       }
@@ -144,17 +228,26 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
     } finally {
       setIsClaiming(false);
     }
-  }, [claimInput, fetchDeviceStatus]);
+  }, [claimInput, currentUser, fetchDeviceStatus, fetchUserDevices]);
 
-  // Auto-claim if initialToken is provided
+  const handleQrScanSuccess = (scannedCode: string) => {
+    setIsQrScannerOpen(false);
+    setClaimInput(scannedCode);
+    void handleClaimDevice(scannedCode);
+  };
+
+  // Auto-claim if initialToken or initialDeviceId is provided
   useEffect(() => {
-    if (initialToken && !sessionToken) {
-      const timer = setTimeout(() => {
-        void handleClaimDevice(initialToken);
-      }, 0);
-      return () => clearTimeout(timer);
+    if (!sessionToken) {
+      const target = initialToken || initialDeviceId;
+      if (target) {
+        const timer = setTimeout(() => {
+          void handleClaimDevice(target);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [initialToken, sessionToken, handleClaimDevice]);
+  }, [initialToken, initialDeviceId, sessionToken, handleClaimDevice]);
 
   // Load status on mount if session exists
   useEffect(() => {
@@ -337,6 +430,159 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* User Account / Google Login Badge */}
+          {currentUser ? (
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setShowDeviceSelector(!showDeviceSelector)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  backgroundColor: '#161b26',
+                  border: '1px solid rgba(0, 229, 255, 0.3)',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  color: '#fff',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#00e5ff' }} />
+                <span style={{ fontWeight: 500 }}>{currentUser.name || currentUser.email}</span>
+                {userDevices.length > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: 'rgba(0, 229, 255, 0.15)',
+                      color: '#00e5ff',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontSize: '0.72rem',
+                    }}
+                  >
+                    {userDevices.length} {userDevices.length === 1 ? 'device' : 'devices'}
+                  </span>
+                )}
+                <ChevronDown size={14} color="#8e96a4" />
+              </button>
+
+              {showDeviceSelector && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    width: '280px',
+                    backgroundColor: '#121620',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '8px',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+                    zIndex: 50,
+                    padding: '8px',
+                  }}
+                >
+                  <div style={{ fontSize: '0.72rem', color: '#8e96a4', fontWeight: 600, padding: '4px 8px', textTransform: 'uppercase' }}>
+                    My Registered Devices
+                  </div>
+                  {userDevices.length === 0 ? (
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280', padding: '8px' }}>
+                      No devices bound to this account yet. Pair with OLED QR below.
+                    </div>
+                  ) : (
+                    userDevices.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => handleSelectDevice(d.id)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          backgroundColor: deviceId === d.id ? 'rgba(0, 229, 255, 0.12)' : 'transparent',
+                          color: deviceId === d.id ? '#00e5ff' : '#f2f4f8',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{d.label || 'NOVA Keychain'}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#8e96a4', fontFamily: 'monospace' }}>{d.id}</div>
+                          {d.notion_workspace && (
+                            <div style={{ fontSize: '0.68rem', color: '#10b981' }}>Notion: {d.notion_workspace}</div>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            backgroundColor: d.status === 'online' ? '#10b981' : '#6b7280',
+                          }}
+                          title={d.status === 'online' ? 'Device Online' : 'Offline'}
+                        />
+                      </button>
+                    ))
+                  )}
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '6px 0' }} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentUser(null);
+                      localStorage.removeItem('nova_user_profile');
+                      localStorage.removeItem('nova_user_id');
+                      setShowDeviceSelector(false);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      background: 'none',
+                      border: 'none',
+                      color: '#ef4444',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Sign Out of Account
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoggingIn}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: '#ffffff',
+                color: '#1f2937',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '5px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: isLoggingIn ? 'wait' : 'pointer',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>{isLoggingIn ? 'Connecting...' : 'Sign in with Google'}</span>
+            </button>
+          )}
+
           <div
             style={{
               display: 'flex',
@@ -409,8 +655,110 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
               >
                 <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '0 0 0.4rem' }}>Enter OLED Claim Token</h2>
                 <p style={{ fontSize: '0.85rem', color: '#8e96a4', margin: '0 0 1.25rem', lineHeight: 1.45 }}>
-                  Scan the QR code shown on your OLED screen or enter the 8-character code (e.g. <code>NOV-48F6</code>) below.
+                  Scan the QR code shown on your OLED screen with your camera or enter the pairing code below.
                 </p>
+
+                {/* Camera QR Scanner Button */}
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsQrScannerOpen(true)}
+                    style={{
+                      width: '100%',
+                      padding: '0.85rem 1rem',
+                      backgroundColor: 'rgba(0, 229, 255, 0.12)',
+                      border: '1px solid #00e5ff',
+                      borderRadius: '8px',
+                      color: '#00e5ff',
+                      fontWeight: 600,
+                      fontSize: '0.92rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.6rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Camera size={18} />
+                    <span>Scan OLED QR with Camera</span>
+                  </button>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '0.85rem 0' }}>
+                    <div style={{ flex: 1, height: '1px', backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                    <span style={{ fontSize: '0.72rem', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Or enter token / ID manually
+                    </span>
+                    <div style={{ flex: 1, height: '1px', backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                  </div>
+                </div>
+
+                {/* Saved User Devices List */}
+                {userDevices.length > 0 && (
+                  <div
+                    style={{
+                      marginBottom: '1.25rem',
+                      padding: '0.9rem',
+                      backgroundColor: 'rgba(0, 229, 255, 0.05)',
+                      border: '1px solid rgba(0, 229, 255, 0.25)',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        color: '#00e5ff',
+                        marginBottom: '0.5rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <CheckCircle2 size={13} />
+                      <span>Linked to Your Account</span>
+                    </div>
+                    {userDevices.map((d) => (
+                      <div
+                        key={d.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.5rem 0.75rem',
+                          backgroundColor: '#161a24',
+                          borderRadius: '6px',
+                          marginBottom: '0.35rem',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#fff' }}>{d.label || d.id}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#8e96a4', fontFamily: 'monospace' }}>{d.id}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectDevice(d.id)}
+                          style={{
+                            padding: '4px 10px',
+                            backgroundColor: '#00e5ff',
+                            color: '#000',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                          }}
+                        >
+                          <span>Connect</span>
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {claimError && (
                   <div
@@ -452,14 +800,14 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                         letterSpacing: '0.05em',
                       }}
                     >
-                      Token or Shortcode
+                      Token or Device ID
                     </label>
                     <input
                       id="claim-token"
                       type="text"
                       value={claimInput}
                       onChange={(e) => setClaimInput(e.target.value)}
-                      placeholder="clm_live_... or NOV-XXXX"
+                      placeholder="clm_live_... or nova-c3-..."
                       required
                       style={{
                         width: '100%',
@@ -494,6 +842,30 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                   >
                     {isClaiming ? 'Binding Hardware Identity...' : 'Claim & Authorize Device'}
                   </button>
+
+                  <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '0.74rem', color: '#8e96a4' }}>Enrolled Hardware:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimInput('nova-c3-5c20dc4239fca9ec');
+                        void handleClaimDevice('nova-c3-5c20dc4239fca9ec');
+                      }}
+                      style={{
+                        background: 'none',
+                        border: '1px solid rgba(0, 229, 255, 0.3)',
+                        backgroundColor: 'rgba(0, 229, 255, 0.05)',
+                        borderRadius: '4px',
+                        padding: '2px 8px',
+                        fontSize: '0.74rem',
+                        color: '#00e5ff',
+                        cursor: 'pointer',
+                        fontFamily: 'monospace',
+                      }}
+                    >
+                      nova-c3-5c20dc4239fca9ec
+                    </button>
+                  </div>
                 </form>
 
                 {/* SoftAP Privacy Notice */}
@@ -1039,6 +1411,12 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
           </div>
         )}
       </main>
+
+      <QrCameraScannerModal
+        isOpen={isQrScannerOpen}
+        onClose={() => setIsQrScannerOpen(false)}
+        onScanSuccess={handleQrScanSuccess}
+      />
     </div>
   );
 };

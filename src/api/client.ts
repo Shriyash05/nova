@@ -22,6 +22,9 @@ import type {
   NotionAuthorizeResult,
   NotionCallbackPayload,
   NotionDisconnectPayload,
+  GoogleAuthPayload,
+  GoogleAuthResult,
+  UserDevicesResult,
 } from './types';
 import type { NotionConnectionInfo, NotionSyncTestResult } from '../domain/notion';
 import { mockApi } from './mockApi';
@@ -199,6 +202,46 @@ export class NovaApiClient {
     }
 
     return res;
+  }
+
+  public async loginWithGoogle(
+    payload: GoogleAuthPayload
+  ): Promise<ApiResponse<GoogleAuthResult>> {
+    const res = await this.request<GoogleAuthResult>('/api/v1/auth/google', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (res.success && res.data?.sessionToken) {
+      this.setSessionToken(res.data.sessionToken);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('nova_user_id', res.data.user.id);
+        localStorage.setItem('nova_user_profile', JSON.stringify(res.data.user));
+      }
+    }
+    return res;
+  }
+
+  public async getUserDevices(
+    userId?: string
+  ): Promise<ApiResponse<UserDevicesResult>> {
+    const q = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.request<UserDevicesResult>(`/api/v1/user/devices${q}`, {
+      method: 'GET',
+    });
+  }
+
+  public async linkUserDevice(
+    userId: string,
+    deviceId: string,
+    label?: string
+  ): Promise<ApiResponse<{ linked: boolean; userId: string; deviceId: string }>> {
+    return this.request<{ linked: boolean; userId: string; deviceId: string }>(
+      '/api/v1/user/devices/link',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, deviceId, label }),
+      }
+    );
   }
 
   public async getDeviceStatus(

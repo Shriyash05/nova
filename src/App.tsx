@@ -28,7 +28,9 @@ export const App: React.FC = () => {
         p.get('claim_token') ||
         p.get('short_code') ||
         p.get('notion_auth') ||
-        p.get('setup')
+        p.get('setup') ||
+        p.get('d') ||
+        p.get('deviceId')
       ) {
         return 'device_lab';
       }
@@ -127,7 +129,9 @@ export const App: React.FC = () => {
   // ===========================================================================
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tokenFromUrl = searchParams.get('token') || searchParams.get('claim_token') || searchParams.get('short_code') || undefined;
-  const deviceIdFromUrl = searchParams.get('deviceId') || undefined;
+  const dParam = searchParams.get('d');
+  const rawDeviceId = searchParams.get('deviceId') || (dParam ? (dParam.startsWith('nova-c3-') ? dParam : `nova-c3-${dParam}`) : undefined);
+  const deviceIdFromUrl = rawDeviceId || undefined;
 
   return (
     <SetupExperience
