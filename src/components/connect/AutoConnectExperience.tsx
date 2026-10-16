@@ -60,8 +60,16 @@ export const AutoConnectExperience: React.FC<AutoConnectExperienceProps> = ({
       }
     }
 
-    // Default physical device if user is physically tethered
-    setDetectedDevId('nova-c3-5c20dc4239fca9ec');
+    // Check if an active device was previously paired in this browser session
+    if (typeof window !== 'undefined') {
+      const storedId = localStorage.getItem('nova_active_device_id');
+      if (storedId) {
+        setDetectedDevId(storedId);
+        setProbing(false);
+        return;
+      }
+    }
+
     setProbing(false);
   };
 

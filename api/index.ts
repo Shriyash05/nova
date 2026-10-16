@@ -967,17 +967,18 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       let avatarUrl = typeof req.body?.avatarUrl === 'string' && req.body.avatarUrl.trim() ? req.body.avatarUrl.trim() : null;
       let googleId: string | null = null;
 
-      if (!isProduction && (credential.startsWith('dev_') || credential.startsWith('test_'))) {
+      const isTestRunner = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+      if (isTestRunner && (credential.startsWith('test_') || credential.startsWith('mock_'))) {
         email = (typeof req.body?.email === 'string' && req.body.email.includes('@'))
           ? req.body.email.trim().toLowerCase()
-          : 'shriyash.nova@gmail.com';
+          : 'test_user@gmail.com';
         if (typeof req.body?.name === 'string' && req.body.name.trim()) {
           name = req.body.name.trim();
         }
         if (typeof req.body?.avatarUrl === 'string' && req.body.avatarUrl.trim()) {
           avatarUrl = req.body.avatarUrl.trim();
         }
-        googleId = `google_dev_${crypto.createHash('sha256').update(email).digest('hex').substring(0, 12)}`;
+        googleId = `google_test_${crypto.createHash('sha256').update(email).digest('hex').substring(0, 12)}`;
       } else {
         try {
           const gRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential.trim())}`);

@@ -24,11 +24,19 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [notionSyncing, setNotionSyncing] = useState(false);
-  const [memos, setMemos] = useState([
-    { id: '1', title: 'Buy high-quality keychain carabiner clips', time: '10 mins ago', status: 'Synced' },
-    { id: '2', title: 'Schedule injection mold factory call for Thursday', time: '1 hour ago', status: 'Synced' },
-    { id: '3', title: 'Note: ESP32-C3 MAX4466 operates at 16,000 Hz', time: '3 hours ago', status: 'Synced' },
-  ]);
+  const [memos, setMemos] = useState<{ id: string; title: string; time: string; status: string }[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('nova_synced_memos');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -165,25 +173,34 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [currentExpression]);
 
-  const handleTriggerSync = () => {
+  const handleTriggerSync = async () => {
     setNotionSyncing(true);
     setCurrentExpression('listening');
-    setTimeout(() => {
+    try {
+      const res = await apiClient.testSync(activeDeviceId);
       setCurrentExpression('thinking');
-      setTimeout(() => {
-        setCurrentExpression('smile');
-        setNotionSyncing(false);
-        setMemos((prev) => [
-          {
-            id: String(Date.now()),
-            title: `Voice Memo captured via ESP32 (${new Date().toLocaleTimeString()})`,
-            time: 'Just now',
-            status: 'Synced',
-          },
-          ...prev,
-        ]);
-      }, 1200);
-    }, 1500);
+      await new Promise((r) => setTimeout(r, 600));
+      setCurrentExpression('smile');
+
+      const title = res.data?.pageTitle || `Voice Memo captured via ESP32 (${new Date().toLocaleTimeString()})`;
+      const newMemo = {
+        id: String(Date.now()),
+        title,
+        time: 'Just now',
+        status: res.success ? 'Synced' : 'Failed',
+      };
+      setMemos((prev) => {
+        const updated = [newMemo, ...prev];
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('nova_synced_memos', JSON.stringify(updated));
+        }
+        return updated;
+      });
+    } catch {
+      setCurrentExpression('idle');
+    } finally {
+      setNotionSyncing(false);
+    }
   };
 
   const handleDisconnect = async () => {
@@ -472,26 +489,47 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {memos.map((memo) => (
+              {memos.length > 0 ? (
+                memos.map((memo) => (
+                  <div
+                    key={memo.id}
+                    style={{
+                      backgroundColor: '#FFF',
+                      border: '1.5px solid #000',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.65rem 0.85rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <CheckCircle2 size={15} color="#27AE60" />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{memo.title}</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>{memo.time}</span>
+                  </div>
+                ))
+              ) : (
                 <div
-                  key={memo.id}
                   style={{
-                    backgroundColor: '#FFF',
-                    border: '1.5px solid #000',
+                    backgroundColor: '#FFFFFF',
+                    border: '1.5px dashed #BBB',
                     borderRadius: 'var(--radius-sm)',
-                    padding: '0.65rem 0.85rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
+                    padding: '1.5rem',
+                    textAlign: 'center',
+                    color: '#666',
+                    fontSize: '0.88rem',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <CheckCircle2 size={15} color="#27AE60" />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{memo.title}</span>
+                  <div style={{ fontWeight: 800, color: '#000', marginBottom: '0.25rem' }}>
+                    No voice memos synced yet
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>{memo.time}</span>
+                  <div>
+                    Say "Hi ESP" to your physical NOVA keychain to capture and sync your first note directly to Notion, or click "Test Voice Memo" above.
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
