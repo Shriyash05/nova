@@ -1,264 +1,284 @@
-import React from 'react';
-import { Radio, Cpu } from 'lucide-react';
+import React, { useState } from 'react';
+import { WaveDivider } from '../illustrations/WaveDivider';
+import { Sparkles, Terminal, ArrowRight } from 'lucide-react';
 
 export interface FooterProps {
+  onOpenPreorderModal?: () => void;
   onEnterDevLab?: () => void;
-  onOpenLockedModal: (actionType: 'buy' | 'setup') => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onEnterDevLab, onOpenLockedModal }) => {
+export const Footer: React.FC<FooterProps> = ({ onOpenPreorderModal: _onOpenPreorderModal, onEnterDevLab }) => {
+  const [email, setEmail] = useState('');
+  const [subscribed, setSubscribed] = useState(false);
+
+  const handleNewsletterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setSubscribed(true);
+  };
+
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
-    <footer
-      style={{
-        backgroundColor: '#06080d',
-        borderTop: '1px solid var(--border-subtle)',
-        paddingTop: '4.5rem',
-        paddingBottom: '3.5rem',
-        color: 'var(--text-secondary)',
-      }}
-    >
-      <div className="marketing-container">
-        {/* Main 4-Column Footer Grid */}
+    <footer style={{ backgroundColor: '#000000', color: '#FFFFFF', position: 'relative' }}>
+      {/* Wave transition from yellow body into black footer */}
+      <WaveDivider fillColor="var(--bg-body-yellow)" bgColor="#000000" />
+
+      <div className="marketing-container" style={{ paddingTop: '3.5rem', paddingBottom: '4rem' }}>
+        {/* Top Newsletter / Preorder Banner in Footer */}
+        <div
+          style={{
+            backgroundColor: '#161616',
+            border: '2px solid #333333',
+            borderRadius: 'var(--radius-xl)',
+            padding: '2.5rem',
+            marginBottom: '4rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            alignItems: 'center',
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-hero-pink)',
+              color: '#000',
+              fontFamily: 'var(--font-heading)',
+              fontWeight: 900,
+              fontSize: '0.8rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '9999px',
+              border: '2px solid #000',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+            }}
+          >
+            <Sparkles size={13} />
+            <span>JOIN BATCH #1 QUEUE</span>
+          </div>
+
+          <h3
+            style={{
+              fontFamily: 'var(--font-heading)',
+              fontSize: 'clamp(1.8rem, 3.8vw, 2.75rem)',
+              fontWeight: 900,
+              color: '#FFFFFF',
+              letterSpacing: '-0.03em',
+              maxWidth: '600px',
+              margin: 0,
+            }}
+          >
+            Ready to give your keys a voice?
+          </h3>
+
+          <p style={{ color: '#AAAAAA', fontSize: '1rem', maxWidth: '460px', margin: 0 }}>
+            Get launch dispatches, private firmware builds, and early access to the custom WakeNet model trainer.
+          </p>
+
+          {!subscribed ? (
+            <form
+              onSubmit={handleNewsletterSubmit}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                justifyContent: 'center',
+                width: '100%',
+                maxWidth: '460px',
+              }}
+            >
+              <input
+                type="email"
+                required
+                placeholder="Enter your email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={{
+                  flex: '1 1 240px',
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: 'var(--radius-full)',
+                  border: '2px solid #444',
+                  backgroundColor: '#0A0A0A',
+                  color: '#FFFFFF',
+                  fontSize: '0.95rem',
+                }}
+              />
+              <button
+                type="submit"
+                className="btn-brutal btn-brutal-amber"
+                style={{ padding: '0.85rem 1.75rem', fontSize: '0.95rem' }}
+              >
+                <span>Subscribe</span>
+                <ArrowRight size={15} />
+              </button>
+            </form>
+          ) : (
+            <div
+              style={{
+                backgroundColor: 'rgba(0, 184, 148, 0.2)',
+                border: '1.5px solid #00B894',
+                color: '#55EFC4',
+                padding: '0.75rem 1.5rem',
+                borderRadius: 'var(--radius-full)',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+              }}
+            >
+              ✓ You're in line for Batch #1 notifications!
+            </div>
+          )}
+        </div>
+
+        {/* Navigation & Brand Links Grid */}
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '2.5rem',
-            marginBottom: '4rem',
+            marginBottom: '3.5rem',
           }}
         >
-          {/* Col 1: Wordmark & Architecture Statement */}
-          <div style={{ maxWidth: '300px' }}>
-            <span
-              className="font-display"
-              style={{
-                fontSize: '2rem',
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.03em',
-                display: 'block',
-                marginBottom: '0.75rem',
-              }}
-            >
-              NOVA
-            </span>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
-              The ambient voice assistant keychain. Built on a transparent polycarbonate chassis, monochrome OLED, and secure Notion synchronization.
-            </p>
+          {/* Column 1: Brand & Identity */}
+          <div>
             <div
               style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '2rem',
+                fontWeight: 900,
+                letterSpacing: '-0.04em',
+                marginBottom: '0.85rem',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.4rem',
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.25rem 0.6rem',
-                fontSize: '0.72rem',
-                color: 'var(--text-muted)',
               }}
             >
-              <Radio size={11} style={{ color: 'var(--status-warning)' }} />
-              <span>Phase: Pre-Hardware Prototype</span>
+              super
+              <span style={{ color: 'var(--bg-hero-pink)', marginLeft: '0.15rem' }}>nova</span>
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--accent-cyan)',
+                  marginLeft: '0.25rem',
+                }}
+              />
+            </div>
+            <p style={{ color: '#888888', fontSize: '0.9rem', lineHeight: 1.6, maxWidth: '280px', marginBottom: '1.25rem' }}>
+              The pocket-sized keychain voice assistant with local wake-word, zero subscriptions, and an expressive OLED face.
+            </p>
+            {onEnterDevLab && (
+              <button
+                onClick={onEnterDevLab}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  backgroundColor: '#1E1E1E',
+                  color: '#AAAAAA',
+                  border: '1.5px solid #333333',
+                  padding: '0.45rem 0.85rem',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <Terminal size={12} />
+                <span>Device Setup Console</span>
+              </button>
+            )}
+          </div>
+
+          {/* Column 2: Navigation */}
+          <div>
+            <h4 style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: 900, textTransform: 'uppercase', color: '#FFF', marginBottom: '1rem', letterSpacing: '0.04em' }}>
+              Explore
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              <button onClick={() => scrollTo('features')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                Benefits
+              </button>
+              <button onClick={() => scrollTo('how-it-works')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                How It Works
+              </button>
+              <button onClick={() => scrollTo('expressions')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                OLED Expressions
+              </button>
+              <button onClick={() => scrollTo('specs')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                Hardware Blueprint
+              </button>
+              <button onClick={() => scrollTo('pricing')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                Pre-order Pricing
+              </button>
             </div>
           </div>
 
-          {/* Col 2: Navigation Links */}
+          {/* Column 3: Open Source & Hardware */}
           <div>
-            <h4 style={{ fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Navigation
+            <h4 style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: 900, textTransform: 'uppercase', color: '#FFF', marginBottom: '1rem', letterSpacing: '0.04em' }}>
+              Open Stack
             </h4>
-            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.875rem' }}>
-              <li>
-                <button
-                  onClick={() => scrollTo('product')}
-                  style={{ background: 'none', color: 'var(--text-secondary)', textAlign: 'left', padding: 0 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  Product Experience
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => scrollTo('how-it-works')}
-                  style={{ background: 'none', color: 'var(--text-secondary)', textAlign: 'left', padding: 0 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  How It Works
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => scrollTo('hardware')}
-                  style={{ background: 'none', color: 'var(--text-secondary)', textAlign: 'left', padding: 0 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  Hardware Specifications
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => scrollTo('privacy')}
-                  style={{ background: 'none', color: 'var(--text-secondary)', textAlign: 'left', padding: 0 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  Security &amp; Notion
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => scrollTo('faq')}
-                  style={{ background: 'none', color: 'var(--text-secondary)', textAlign: 'left', padding: 0 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  FAQ
-                </button>
-              </li>
-            </ul>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', color: '#888', fontSize: '0.9rem' }}>
+              <span>ESP-IDF 6.1 Framework</span>
+              <span>WakeNet wn9s_hiesp</span>
+              <span>FreeRTOS Dual-Task Architecture</span>
+              <span>SSD1306 400kHz I2C Driver</span>
+              <span>Supabase &amp; Notion OAuth 2.0</span>
+            </div>
           </div>
 
-          {/* Col 3: Actions & Developer Mode */}
+          {/* Column 4: Hardware Telemetry Verification Beacon */}
           <div>
-            <h4 style={{ fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Access &amp; Actions
+            <h4 style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: 900, textTransform: 'uppercase', color: '#FFF', marginBottom: '1rem', letterSpacing: '0.04em' }}>
+              Bench Status
             </h4>
-            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.875rem' }}>
-              <li>
-                <button
-                  onClick={() => scrollTo('launch-signup')}
-                  style={{ background: 'none', color: 'var(--accent-cyan)', textAlign: 'left', padding: 0, fontWeight: 600 }}
-                >
-                  Get Launch Updates &rarr;
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onOpenLockedModal('setup')}
-                  style={{ background: 'none', color: 'var(--text-muted)', textAlign: 'left', padding: 0 }}
-                >
-                  Device Setup (Locked)
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onOpenLockedModal('buy')}
-                  style={{ background: 'none', color: 'var(--text-muted)', textAlign: 'left', padding: 0 }}
-                >
-                  Buy NOVA (Coming Soon)
-                </button>
-              </li>
-              {onEnterDevLab && (
-                <li style={{ marginTop: '0.5rem' }}>
-                  <button
-                    onClick={onEnterDevLab}
-                    style={{
-                      background: 'var(--bg-surface)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '0.35rem 0.65rem',
-                      color: 'var(--text-primary)',
-                      fontSize: '0.78rem',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                    }}
-                    title="Launch Device Lab & Vault Management"
-                  >
-                    <Cpu size={13} style={{ color: 'var(--accent-cyan)' }} />
-                    <span>Enter Bench Lab</span>
-                  </button>
-                </li>
-              )}
-            </ul>
-          </div>
-
-          {/* Col 4: Repository & Real Support */}
-          <div>
-            <h4 style={{ fontSize: '0.85rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Open Source &amp; Code
-            </h4>
-            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.875rem' }}>
-              <li>
-                <a
-                  href="https://github.com/Shriyash05/nova"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    color: 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    textDecoration: 'none',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-                    <path d="M9 18c-4.51 2-5-2-7-2" />
-                  </svg>
-                  <span>GitHub Repository</span>
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://github.com/Shriyash05/nova/issues"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  Issue Tracker
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://buynovastore.vercel.app/api/health"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                >
-                  Live Health Check API
-                </a>
-              </li>
-            </ul>
+            <div
+              style={{
+                backgroundColor: '#121212',
+                border: '1.5px solid #282828',
+                borderRadius: '12px',
+                padding: '1rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', color: '#55EFC4', fontSize: '0.82rem', fontWeight: 800 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#55EFC4', boxShadow: '0 0 6px #55EFC4' }} />
+                <span>COM5 LIVE ON BENCH</span>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: '#777', lineHeight: 1.5, margin: 0 }}>
+                ESP32-C3 active at 16,000 Hz audio DMA. Centralized state machine &amp; 10s utterance guard deployed.
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Bottom Baseline Bar */}
+        {/* Bottom Legal / Regulatory Line */}
         <div
           style={{
+            borderTop: '1px solid #222222',
             paddingTop: '2rem',
-            borderTop: '1px solid var(--border-subtle)',
             display: 'flex',
             flexWrap: 'wrap',
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: '1rem',
-            fontSize: '0.8rem',
-            color: 'var(--text-muted)',
+            fontSize: '0.82rem',
+            color: '#666',
           }}
         >
           <div>
-            &copy; 2026 NOVA Project. Prototype development phase. All hardware behavior subject to bench testing.
+            © 2026 NOVA Project. Built with open hardware integrity and zero subscription lock-in.
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-            <span>ESP32 Firmware Evaluation (v1.0.0-dev)</span>
-            <span style={{ color: 'var(--border-subtle)' }}>&bull;</span>
-            <span>Production: buynovastore.vercel.app</span>
+            <span>DPDP 2023 Compliant</span>
+            <span>•</span>
+            <span>WPC ETA Self-Declaration</span>
+            <span>•</span>
+            <span>RoHS Lead-Free</span>
           </div>
         </div>
       </div>

@@ -2,19 +2,20 @@ import React, { useState } from 'react';
 import './styles/global.css';
 import './styles/components.css';
 
-// Marketing Redesign Components
+// Retro-Pop Neo-Brutalist Components
 import { Navbar } from './components/marketing/Navbar';
 import { HeroSection } from './components/marketing/HeroSection';
-import { ProductExperience } from './components/marketing/ProductExperience';
-import { HardwareSection } from './components/marketing/HardwareSection';
+import { FutureSection } from './components/marketing/FutureSection';
 import { HowItWorksSection } from './components/marketing/HowItWorksSection';
-import { PrivacyNotionSection } from './components/marketing/PrivacyNotionSection';
+import { OledSimulatorSection } from './components/marketing/OledSimulatorSection';
+import { HardwareSpecsSection } from './components/marketing/HardwareSpecsSection';
+import { NotionSyncSection } from './components/marketing/NotionSyncSection';
+import { PricingSection } from './components/marketing/PricingSection';
 import { FaqSection } from './components/marketing/FaqSection';
-import { LaunchSignupSection } from './components/marketing/LaunchSignupSection';
 import { Footer } from './components/marketing/Footer';
-import { LockedActionModal } from './components/marketing/LockedActionModal';
+import { PreorderModal } from './components/marketing/PreorderModal';
 
-// Redesigned Bespoke Hardware Setup & Console
+// Authentic Hardware Setup & Console
 import { SetupExperience } from './components/setup/SetupExperience';
 
 export const App: React.FC = () => {
@@ -38,17 +39,16 @@ export const App: React.FC = () => {
     return 'marketing';
   });
 
-  const [lockedModalOpen, setLockedModalOpen] = useState(false);
-  const [lockedActionType, setLockedActionType] = useState<'buy' | 'setup'>('buy');
+  const [preorderModalOpen, setPreorderModalOpen] = useState(false);
+  const [preorderTier, setPreorderTier] = useState<'maker' | 'keychain' | 'twin'>('keychain');
 
-
-  const handleOpenLockedModal = (actionType: 'buy' | 'setup') => {
-    setLockedActionType(actionType);
-    setLockedModalOpen(true);
+  const handleOpenPreorder = (tier: 'maker' | 'keychain' | 'twin' = 'keychain') => {
+    setPreorderTier(tier);
+    setPreorderModalOpen(true);
   };
 
-  const scrollToSignup = () => {
-    const element = document.getElementById('launch-signup');
+  const scrollToHowItWorks = () => {
+    const element = document.getElementById('how-it-works');
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
     }
@@ -59,73 +59,66 @@ export const App: React.FC = () => {
   // ===========================================================================
   if (viewMode === 'marketing') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-body-yellow)' }}>
         {/* Accessible Keyboard Skip Link */}
-        <a href="#main-content" className="sr-only">
+        <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
 
-        {/* Section A: Global Navigation */}
+        {/* Pitch-Black Top Navigation Bar */}
         <Navbar
-          onOpenLockedModal={handleOpenLockedModal}
-          onSignupClick={scrollToSignup}
+          onOpenPreorderModal={() => handleOpenPreorder('keychain')}
+          onEnterDevLab={() => setViewMode('device_lab')}
         />
 
         {/* Main Content Landmark */}
         <main id="main-content">
-          {/* Section B: Hero */}
+          {/* Bubblegum Pink Hero with Giant Display Typography & Isometric Robot */}
           <HeroSection
-            onOpenLockedModal={handleOpenLockedModal}
-            onExploreClick={() => {
-              const el = document.getElementById('product');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-            onHowItWorksClick={() => {
-              const el = document.getElementById('how-it-works');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-            onSignupClick={scrollToSignup}
+            onOpenPreorderModal={() => handleOpenPreorder('keychain')}
+            onExploreClick={scrollToHowItWorks}
           />
 
-          {/* Section C: Product Experience & OLED Simulator */}
-          <ProductExperience />
+          {/* Scalloped Wavy Divider into Warm Sunflower Yellow Future Section */}
+          <FutureSection />
 
-          {/* Section D: Verified Hardware Architecture */}
-          <HardwareSection />
-
-          {/* Section E: How It Works & Edge-to-Cloud Flow */}
+          {/* 3 Neo-Brutalist Cards ("Wake", "Speak", "Express & Sync") & Marquee Ticker */}
           <HowItWorksSection />
 
-          {/* Section F: Notion Integration & Privacy Model */}
-          <PrivacyNotionSection />
+          {/* Interactive Live 128×64 OLED Face Simulator & Voice Cycle Trigger */}
+          <OledSimulatorSection />
 
-          {/* Section G: Genuine FAQ */}
+          {/* Hardware Blueprint & Verified Component Specifications */}
+          <HardwareSpecsSection />
+
+          {/* Notion Database Real-time Voice Memo Synchronization */}
+          <NotionSyncSection />
+
+          {/* 3-Tier Pre-order Pricing Cards */}
+          <PricingSection onSelectTier={(tier) => handleOpenPreorder(tier)} />
+
+          {/* Frequently Asked Questions Neo-Brutalist Accordion */}
           <FaqSection />
-
-          {/* Section H: Launch Conversion Signup (Live API) */}
-          <LaunchSignupSection />
         </main>
 
-        {/* Section I: Footer */}
+        {/* Wavy Divider into Pitch-Black Footer */}
         <Footer
-          onOpenLockedModal={handleOpenLockedModal}
+          onOpenPreorderModal={() => handleOpenPreorder('keychain')}
           onEnterDevLab={() => setViewMode('device_lab')}
         />
 
-        {/* Transparent Locked Actions Dialog */}
-        <LockedActionModal
-          isOpen={lockedModalOpen}
-          onClose={() => setLockedModalOpen(false)}
-          actionType={lockedActionType}
-          onEnterDevMode={() => setViewMode('device_lab')}
-          onJumpToSignup={scrollToSignup}
+        {/* Interactive Pre-order Checkout Modal */}
+        <PreorderModal
+          isOpen={preorderModalOpen}
+          onClose={() => setPreorderModalOpen(false)}
+          initialTier={preorderTier}
         />
       </div>
     );
   }
 
   // ===========================================================================
-  // 2. HARDWARE SETUP & BENCH CONSOLE (Authentic, anti-slop hardware pairing)
+  // 2. HARDWARE SETUP & BENCH CONSOLE (Authentic hardware pairing & Wi-Fi vault)
   // ===========================================================================
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tokenFromUrl = searchParams.get('token') || searchParams.get('claim_token') || searchParams.get('short_code') || undefined;

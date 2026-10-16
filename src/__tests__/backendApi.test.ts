@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import handler, { checkRateLimit, pruneExpiredRateLimits, _setPoolForTesting } from '../../api/index.ts';
+import handler, { checkRateLimit, pruneExpiredRateLimits, _setPoolForTesting, ensureUserTables } from '../../api/index.ts';
 import healthHandler from '../../api/health.ts';
 import crypto from 'crypto';
 import pg from 'pg';
@@ -42,20 +42,23 @@ beforeAll(async () => {
   });
 
   try {
-    // Reset bootstrap used status for clean repeatable test runs
+    // Reset test devices secret and status for clean repeatable test runs
     await pool.query(
-      `UPDATE device_bootstrap_credentials
-       SET is_used = FALSE
-       WHERE device_id IN ('nova-c3-5c20dc4239fca9ec', 'nova-c3-other99887766')`
+      `UPDATE devices
+       SET device_secret = NULL, status = 'unprovisioned'
+       WHERE id IN ('nova-c3-5c20dc4239fca9ec', 'nova-c3-other99887766', 'nova-c3-test-device-01')`
     );
+    // Reset bootstrap used status for clean repeatable test runs
+    await pool.query('UPDATE device_bootstrap_credentials SET is_used = FALSE');
     // Clear test wifi profiles
     await pool.query(
       `DELETE FROM wifi_profiles
-       WHERE device_id IN ('nova-c3-5c20dc4239fca9ec', 'nova-c3-other99887766')`
+       WHERE device_id IN ('nova-c3-5c20dc4239fca9ec', 'nova-c3-other99887766', 'nova-c3-test-device-01')`
     );
     // Clear ephemeral rate limits and oauth states
     await pool.query('DELETE FROM rate_limits');
     await pool.query('DELETE FROM oauth_states');
+    await ensureUserTables();
   } finally {
     await pool.end();
   }
@@ -1621,5 +1624,312 @@ describe('NOVA Real ESP32-C3 Firmware Integration & Security Suite', { timeout: 
       url: '/api/health',
     });
     expect(firmwareRes.headers['access-control-allow-origin']).toBe('*');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase E: Hardened Backend & API Verification Suite
+  // ---------------------------------------------------------------------------
+
+  it('Phase E: Google Auth strictly rejects unauthenticated raw email injection (401 INVALID_CREDENTIALS)', async () => {
+    // 1. Raw email injection without credential
+    const rawEmailRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/google',
+      body: { email: 'victim@example.com', name: 'Victim' },
+    });
+    expect(rawEmailRes.statusCode).toBe(401);
+    expect(rawEmailRes.body.error?.code).toBe('INVALID_CREDENTIALS');
+
+    // 2. Empty / whitespace credential
+    const emptyCredRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/google',
+      body: { credential: '   ', email: 'victim@example.com' },
+    });
+    expect(emptyCredRes.statusCode).toBe(401);
+    expect(emptyCredRes.body.error?.code).toBe('INVALID_CREDENTIALS');
+
+    // 3. Invalid Google token payload rejected by Google tokeninfo
+    const invalidTokenRes = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/auth/google',
+      body: { credential: 'forged_google_id_token_xyz' },
+    });
+    expect(invalidTokenRes.statusCode).toBe(401);
+    expect(invalidTokenRes.body.error?.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  it('Phase E: Google Auth accepts cryptographically verified token and creates durable session', async () => {
+    const originalFetch = global.fetch;
+    const testEmail = `tester_verified_${Date.now()}@gmail.com`;
+    const testSub = `goog_sub_${Date.now()}`;
+
+    // Mock global fetch for Google tokeninfo
+    global.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('oauth2.googleapis.com/tokeninfo')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            email: testEmail,
+            email_verified: true,
+            name: 'Verified Tester',
+            picture: 'https://lh3.googleusercontent.com/test-pic.jpg',
+            sub: testSub,
+          }),
+        } as any;
+      }
+      return originalFetch(url, init);
+    };
+
+    try {
+      const authRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/auth/google',
+        body: { credential: 'valid_mock_google_token_123' },
+      });
+
+      expect(authRes.statusCode).toBe(200);
+      expect(authRes.body.success).toBe(true);
+      expect(authRes.body.data.user?.email).toBe(testEmail);
+      expect(authRes.body.data.user?.google_id).toBe(testSub);
+      expect(authRes.body.data.sessionToken).toMatch(/^usess_/);
+
+      const createdSessionToken = authRes.body.data.sessionToken;
+      const createdUserId = authRes.body.data.user.id;
+
+      // Clean up in DB
+      const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+      try {
+        await pool.query('DELETE FROM user_sessions WHERE id = $1', [createdSessionToken]);
+        await pool.query('DELETE FROM users WHERE id = $1', [createdUserId]);
+      } finally {
+        await pool.end();
+      }
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('Phase E: User Device IDOR — GET /api/v1/user/devices strictly isolates device access', async () => {
+    // 1. Unauthenticated request without session is rejected (401)
+    const unauthRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/v1/user/devices',
+    });
+    expect(unauthRes.statusCode).toBe(401);
+    expect(unauthRes.body.error?.code).toBe('UNAUTHORIZED');
+
+    // 2. Unauthenticated request attempting IDOR via query parameter is rejected (401)
+    const queryIdorRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/v1/user/devices?userId=usr_victim123',
+    });
+    expect(queryIdorRes.statusCode).toBe(401);
+    expect(queryIdorRes.body.error?.code).toBe('UNAUTHORIZED');
+
+    // 3. Unauthenticated request attempting IDOR via header is rejected (401)
+    const headerIdorRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/v1/user/devices',
+      headers: { 'x-nova-user-id': 'usr_victim123' },
+    });
+    expect(headerIdorRes.statusCode).toBe(401);
+    expect(headerIdorRes.body.error?.code).toBe('UNAUTHORIZED');
+
+    // Setup two authentic users with sessions in DB
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    const userA = `usr_alice_${Date.now()}`;
+    const userB = `usr_bob_${Date.now()}`;
+    const sessA = `usess_alice_${Date.now()}`;
+    const sessB = `usess_bob_${Date.now()}`;
+
+    try {
+      await pool.query(
+        `INSERT INTO users (id, email, name, updated_at) VALUES
+         ($1, $2, 'Alice', NOW()),
+         ($3, $4, 'Bob', NOW())`,
+        [userA, `${userA}@test.com`, userB, `${userB}@test.com`]
+      );
+      await pool.query(
+        `INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+         ($1, $2, NOW() + INTERVAL '1 day'),
+         ($3, $4, NOW() + INTERVAL '1 day')`,
+        [sessA, userA, sessB, userB]
+      );
+
+      // 4. Alice attempts to access Bob's devices using her valid session (403 FORBIDDEN)
+      const idorAttemptRes = await simulateRequest({
+        method: 'GET',
+        url: `/api/v1/user/devices?userId=${userB}`,
+        headers: { Authorization: `Bearer ${sessA}` },
+      });
+      expect(idorAttemptRes.statusCode).toBe(403);
+      expect(idorAttemptRes.body.error?.code).toBe('FORBIDDEN');
+
+      // 5. Alice accesses her own devices with her session (200 OK)
+      const ownDevicesRes = await simulateRequest({
+        method: 'GET',
+        url: '/api/v1/user/devices',
+        headers: { Authorization: `Bearer ${sessA}` },
+      });
+      expect(ownDevicesRes.statusCode).toBe(200);
+      expect(ownDevicesRes.body.success).toBe(true);
+      expect(ownDevicesRes.body.data.userId).toBe(userA);
+      expect(Array.isArray(ownDevicesRes.body.data.devices)).toBe(true);
+    } finally {
+      await pool.query('DELETE FROM user_sessions WHERE id IN ($1, $2)', [sessA, sessB]);
+      await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [userA, userB]);
+      await pool.end();
+    }
+  });
+
+  it('Phase E: User Device IDOR — POST /api/v1/user/devices/link enforces caller authorization', async () => {
+    // 1. Unauthenticated request rejected with 401
+    const unauthLink = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/user/devices/link',
+      body: { userId: 'usr_attacker', deviceId: REAL_DEVICE_ID },
+    });
+    expect(unauthLink.statusCode).toBe(401);
+    expect(unauthLink.body.error?.code).toBe('UNAUTHORIZED');
+
+    const pool = new Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+    const userA = `usr_charlie_${Date.now()}`;
+    const userB = `usr_dave_${Date.now()}`;
+    const sessA = `usess_charlie_${Date.now()}`;
+
+    try {
+      await pool.query(
+        `INSERT INTO users (id, email, name, updated_at) VALUES
+         ($1, $2, 'Charlie', NOW()),
+         ($3, $4, 'Dave', NOW())`,
+        [userA, `${userA}@test.com`, userB, `${userB}@test.com`]
+      );
+      await pool.query(
+        `INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+         ($1, $2, NOW() + INTERVAL '1 day')`,
+        [sessA, userA]
+      );
+
+      // 2. Charlie attempts to link device to Dave's account (403 FORBIDDEN)
+      const crossLinkRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/user/devices/link',
+        headers: { Authorization: `Bearer ${sessA}` },
+        body: { userId: userB, deviceId: REAL_DEVICE_ID },
+      });
+      expect(crossLinkRes.statusCode).toBe(403);
+      expect(crossLinkRes.body.error?.code).toBe('FORBIDDEN');
+
+      // 3. Charlie links device to his own account (200 OK)
+      const ownLinkRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/user/devices/link',
+        headers: { Authorization: `Bearer ${sessA}` },
+        body: { deviceId: REAL_DEVICE_ID, label: "Charlie's NOVA" },
+      });
+      expect(ownLinkRes.statusCode).toBe(200);
+      expect(ownLinkRes.body.success).toBe(true);
+      expect(ownLinkRes.body.data.linked).toBe(true);
+      expect(ownLinkRes.body.data.userId).toBe(userA);
+
+      // Verify persistence in user_devices
+      const linkRows = await pool.query<{ user_id: string; device_id: string }>(
+        'SELECT user_id, device_id FROM user_devices WHERE user_id = $1 AND device_id = $2',
+        [userA, REAL_DEVICE_ID]
+      );
+      expect(linkRows.rows.length).toBe(1);
+    } finally {
+      await pool.query('DELETE FROM user_devices WHERE user_id IN ($1, $2)', [userA, userB]);
+      await pool.query('DELETE FROM user_sessions WHERE id = $1', [sessA]);
+      await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [userA, userB]);
+      await pool.end();
+    }
+  });
+
+  it('Phase E: api/health.ts sets strict defensive HTTP security headers', async () => {
+    const healthRes = await simulateRequest({
+      method: 'GET',
+      url: '/api/health',
+      handlerFn: healthHandler,
+    });
+    expect(healthRes.statusCode).toBe(200);
+    expect(healthRes.headers['x-content-type-options']).toBe('nosniff');
+    expect(healthRes.headers['x-frame-options']).toBe('DENY');
+    expect(healthRes.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    expect(healthRes.headers['permissions-policy']).toBe('camera=(), microphone=(), geolocation=()');
+  });
+
+  it('Phase E: Device endpoints idempotency — POST /api/v1/devices/heartbeat', async () => {
+    let activeKey = issuedDeviceKey;
+    if (!activeKey) {
+      const bootRes = await simulateRequest({
+        method: 'POST',
+        url: '/api/v1/devices/bootstrap',
+        body: {
+          deviceId: REAL_DEVICE_ID,
+          macAddress: REAL_MAC,
+          bootstrapCredential: REAL_BOOTSTRAP_SECRET,
+          recovery: true,
+        },
+      });
+      if (bootRes.statusCode === 200 && bootRes.body.data?.deviceKey) {
+        activeKey = bootRes.body.data.deviceKey;
+        issuedDeviceKey = activeKey;
+      }
+    }
+
+    // 1. Direct heartbeat with x-nova-device-id header
+    const hb1 = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/heartbeat',
+      headers: {
+        Authorization: `Bearer ${activeKey}`,
+        'x-nova-device-id': REAL_DEVICE_ID,
+      },
+      body: {
+        wifiConnected: true,
+        rssi: -58,
+        oledState: 'idle',
+      },
+    });
+    expect(hb1.statusCode).toBe(200);
+    expect(hb1.body.success).toBe(true);
+    expect(hb1.body.data.status).toBe('online');
+
+    // 2. Repeated heartbeat with identical telemetry is idempotent
+    const hb2 = await simulateRequest({
+      method: 'POST',
+      url: '/api/v1/devices/heartbeat',
+      headers: {
+        Authorization: `Bearer ${activeKey}`,
+        'x-nova-device-id': REAL_DEVICE_ID,
+      },
+      body: {
+        wifiConnected: true,
+        rssi: -58,
+        oledState: 'idle',
+      },
+    });
+    expect(hb2.statusCode).toBe(200);
+    expect(hb2.body.success).toBe(true);
+    expect(hb2.body.data.status).toBe('online');
+    expect(hb2.body.data.deviceId).toBe(REAL_DEVICE_ID);
+
+    // 3. Heartbeat path with :id parameter is also idempotent
+    const hb3 = await simulateRequest({
+      method: 'POST',
+      url: `/api/v1/devices/${REAL_DEVICE_ID}/heartbeat`,
+      headers: { Authorization: `Bearer ${activeKey}` },
+      body: {
+        wifiConnected: true,
+        rssi: -58,
+        oledState: 'idle',
+      },
+    });
+    expect(hb3.statusCode).toBe(200);
+    expect(hb3.body.success).toBe(true);
   });
 });

@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
-import { Menu, X, ArrowRight, Lock, Radio } from 'lucide-react';
+import { Menu, X, Sparkles, Terminal } from 'lucide-react';
 
 export interface NavbarProps {
-  onOpenLockedModal: (actionType: 'buy' | 'setup') => void;
+  onOpenPreorderModal: () => void;
   onEnterDevLab?: () => void;
-  onSignupClick?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab, onSignupClick }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onOpenPreorderModal, onEnterDevLab }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const scrollToSection = (id: string) => {
+  const scrollTo = (id: string) => {
     setMobileMenuOpen(false);
     const element = document.getElementById(id);
     if (element) {
@@ -24,8 +23,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
         position: 'sticky',
         top: 0,
         zIndex: 100,
-        backgroundColor: 'var(--bg-app)',
-        borderBottom: '1px solid var(--border-subtle)',
+        backgroundColor: '#000000',
+        borderBottom: '2.5px solid #000000',
+        color: '#FFFFFF',
       }}
     >
       <div
@@ -34,51 +34,68 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          height: '4.25rem',
+          height: '4.5rem',
         }}
       >
-        {/* Brand Wordmark & Status Badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        {/* Brand Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
           <a
             href="/"
             aria-label="NOVA home"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              color: 'var(--text-primary)',
+              gap: '0.4rem',
+              color: '#FFFFFF',
               textDecoration: 'none',
             }}
           >
             <span
-              className="font-display"
               style={{
-                fontSize: '1.65rem',
-                letterSpacing: '-0.03em',
-                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-display)',
+                fontSize: '1.85rem',
+                fontWeight: 900,
+                letterSpacing: '-0.04em',
+                color: '#FFFFFF',
+                display: 'inline-flex',
+                alignItems: 'center',
               }}
             >
-              NOVA
+              super
+              <span style={{ color: 'var(--bg-hero-pink)', marginLeft: '0.15rem' }}>nova</span>
             </span>
+            <span
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--accent-cyan)',
+                boxShadow: '0 0 10px #00F2FE',
+                display: 'inline-block',
+                marginLeft: '0.2rem',
+              }}
+            />
           </a>
 
+          {/* Micro status badge */}
           <div
             style={{
-              display: 'inline-flex',
+              display: 'none',
               alignItems: 'center',
               gap: '0.35rem',
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.2rem 0.55rem',
-              fontSize: '0.68rem',
-              color: 'var(--text-muted)',
-              fontWeight: 500,
+              backgroundColor: '#1E1E1E',
+              border: '1.5px solid #333333',
+              borderRadius: '9999px',
+              padding: '0.2rem 0.65rem',
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              color: '#55EFC4',
+              letterSpacing: '0.04em',
             }}
-            title="Hardware status: In bench prototype stage"
+            className="status-badge-desktop"
           >
-            <Radio size={11} style={{ color: 'var(--accent-cyan)' }} />
-            <span>PRE-HARDWARE</span>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#55EFC4' }} />
+            <span>FIRMWARE 1.0</span>
           </div>
         </div>
 
@@ -88,353 +105,261 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenLockedModal, onEnterDevLab
           style={{
             display: 'none',
             alignItems: 'center',
-            gap: '1.75rem',
+            gap: '2rem',
           }}
           className="desktop-nav"
         >
           <button
-            onClick={() => scrollToSection('product')}
+            onClick={() => scrollTo('features')}
             style={{
-              background: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              padding: '0.25rem 0',
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
               transition: 'color var(--transition-fast)',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
           >
-            Product
+            Benefits
           </button>
+
           <button
-            onClick={() => scrollToSection('how-it-works')}
+            onClick={() => scrollTo('how-it-works')}
             style={{
-              background: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              padding: '0.25rem 0',
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
               transition: 'color var(--transition-fast)',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
           >
-            How It Works
+            How it works
           </button>
+
           <button
-            onClick={() => scrollToSection('hardware')}
+            onClick={() => scrollTo('expressions')}
             style={{
-              background: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              padding: '0.25rem 0',
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
               transition: 'color var(--transition-fast)',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
           >
-            Blueprint &amp; Hardware
+            Expressions
           </button>
+
           <button
-            onClick={() => scrollToSection('privacy')}
+            onClick={() => scrollTo('specs')}
             style={{
-              background: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              padding: '0.25rem 0',
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
               transition: 'color var(--transition-fast)',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
           >
-            Security &amp; Notion
+            Hardware
           </button>
+
           <button
-            onClick={() => scrollToSection('faq')}
+            onClick={() => scrollTo('pricing')}
             style={{
-              background: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              padding: '0.25rem 0',
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
               transition: 'color var(--transition-fast)',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
           >
-            FAQ
+            Pricing
+          </button>
+
+          <button
+            onClick={() => scrollTo('faqs')}
+            style={{
+              color: '#FFFFFF',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'color var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--bg-hero-pink)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#FFFFFF')}
+          >
+            FAQs
           </button>
         </nav>
 
-        {/* Action CTAs */}
-        <div style={{ display: 'none', alignItems: 'center', gap: '0.75rem' }} className="desktop-actions">
-          {/* Locked Setup Button */}
-          <button
-            onClick={() => onOpenLockedModal('setup')}
-            style={{
-              background: 'transparent',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.45rem 0.85rem',
-              fontSize: '0.8rem',
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-            }}
-            title="Device setup requires physical hardware"
-          >
-            <Lock size={12} />
-            <span>Setup Device</span>
-          </button>
-
-          {/* Locked Buy Button */}
-          <button
-            onClick={() => onOpenLockedModal('buy')}
-            style={{
-              background: 'var(--bg-surface)',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.45rem 0.85rem',
-              fontSize: '0.8rem',
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-            }}
-            title="Pre-orders not yet open"
-          >
-            <span>Buy NOVA</span>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                backgroundColor: 'rgba(245, 158, 11, 0.15)',
-                color: 'var(--status-warning)',
-                padding: '0.1rem 0.35rem',
-                borderRadius: 'var(--radius-xs)',
-              }}
-            >
-              Soon
-            </span>
-          </button>
-
+        {/* Action Buttons (Right) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
           {onEnterDevLab && (
             <button
               onClick={onEnterDevLab}
               style={{
-                background: 'transparent',
-                color: 'var(--text-muted)',
-                border: 'none',
-                padding: '0.45rem 0.5rem',
-                fontSize: '0.75rem',
+                display: 'none',
+                alignItems: 'center',
+                gap: '0.4rem',
+                backgroundColor: 'transparent',
+                color: '#AAAAAA',
+                border: '1.5px solid #333333',
+                padding: '0.55rem 0.95rem',
+                borderRadius: 'var(--radius-full)',
+                fontSize: '0.82rem',
+                fontWeight: 700,
                 cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
               }}
-              title="Open Hardware Bench Lab"
+              className="dev-lab-btn"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#666';
+                e.currentTarget.style.color = '#FFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#333';
+                e.currentTarget.style.color = '#AAA';
+              }}
+              title="Hardware device pairing console"
             >
-              Lab
+              <Terminal size={13} />
+              <span>Pair Device</span>
             </button>
           )}
 
-          {/* Real Launch Conversion Button */}
+          {/* The White Pill Pre-order Button matching reference "Log in" pill */}
           <button
-            onClick={onSignupClick || (() => scrollToSection('launch-signup'))}
+            onClick={onOpenPreorderModal}
+            className="btn-brutal btn-brutal-white"
             style={{
-              backgroundColor: 'var(--accent-cyan)',
-              color: 'var(--text-on-accent)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.5rem 1.1rem',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              transition: 'opacity var(--transition-fast)',
+              padding: '0.6rem 1.4rem',
+              fontSize: '0.9rem',
+              border: '2px solid #000000',
+              boxShadow: '3px 3px 0px rgba(255,255,255,0.4)',
             }}
           >
-            <span>Get Updates</span>
-            <ArrowRight size={14} />
+            <Sparkles size={14} style={{ color: '#FF9F1C' }} />
+            <span>Pre-order $49</span>
+          </button>
+
+          {/* Mobile Menu Hamburger Button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#1E1E1E',
+              color: '#FFFFFF',
+              border: '2px solid #333',
+              borderRadius: 'var(--radius-sm)',
+              width: '2.5rem',
+              height: '2.5rem',
+              cursor: 'pointer',
+            }}
+            className="mobile-hamburger"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
-
-        {/* Mobile Hamburger Toggle */}
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          aria-expanded={mobileMenuOpen}
-          aria-label="Toggle navigation menu"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'none',
-            color: 'var(--text-primary)',
-            padding: '0.5rem',
-            borderRadius: 'var(--radius-sm)',
-          }}
-          className="mobile-toggle"
-        >
-          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-        </button>
       </div>
 
       {/* Mobile Menu Dropdown */}
       {mobileMenuOpen && (
         <div
           style={{
-            backgroundColor: 'var(--bg-surface)',
-            borderBottom: '1px solid var(--border-strong)',
-            padding: '1.25rem',
+            backgroundColor: '#000000',
+            borderTop: '2px solid #222',
+            padding: '1.5rem',
             display: 'flex',
             flexDirection: 'column',
             gap: '1rem',
           }}
-          className="mobile-drawer"
         >
           <button
-            onClick={() => scrollToSection('product')}
-            style={{
-              background: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '1rem',
-              textAlign: 'left',
-              padding: '0.5rem 0',
-            }}
+            onClick={() => scrollTo('features')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
           >
-            Product
+            Benefits
           </button>
           <button
-            onClick={() => scrollToSection('how-it-works')}
-            style={{
-              background: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '1rem',
-              textAlign: 'left',
-              padding: '0.5rem 0',
-            }}
+            onClick={() => scrollTo('how-it-works')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
           >
-            How It Works
+            How it works
           </button>
           <button
-            onClick={() => scrollToSection('hardware')}
-            style={{
-              background: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '1rem',
-              textAlign: 'left',
-              padding: '0.5rem 0',
-            }}
+            onClick={() => scrollTo('expressions')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
           >
-            Blueprint &amp; Hardware
+            Expressions
           </button>
           <button
-            onClick={() => scrollToSection('privacy')}
-            style={{
-              background: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '1rem',
-              textAlign: 'left',
-              padding: '0.5rem 0',
-            }}
+            onClick={() => scrollTo('specs')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
           >
-            Security &amp; Notion
+            Hardware Specs
           </button>
           <button
-            onClick={() => scrollToSection('faq')}
-            style={{
-              background: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '1rem',
-              textAlign: 'left',
-              padding: '0.5rem 0',
-            }}
+            onClick={() => scrollTo('pricing')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
           >
-            FAQ
+            Pricing & Plans
           </button>
-
-          <div style={{ height: '1px', backgroundColor: 'var(--border-subtle)', margin: '0.25rem 0' }} />
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <button
+            onClick={() => scrollTo('faqs')}
+            style={{ color: '#FFF', textAlign: 'left', fontWeight: 800, fontSize: '1.1rem', padding: '0.5rem 0' }}
+          >
+            FAQs
+          </button>
+          {onEnterDevLab && (
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
-                scrollToSection('launch-signup');
+                onEnterDevLab();
               }}
               style={{
-                backgroundColor: 'var(--accent-cyan)',
-                color: 'var(--text-on-accent)',
-                padding: '0.75rem',
-                borderRadius: 'var(--radius-sm)',
-                fontWeight: 600,
-                fontSize: '0.9rem',
+                color: 'var(--accent-cyan)',
+                textAlign: 'left',
+                fontWeight: 800,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
                 gap: '0.5rem',
               }}
             >
-              <span>Get Launch Notifications</span>
-              <ArrowRight size={15} />
+              <Terminal size={15} />
+              <span>Hardware Pairing Console</span>
             </button>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenLockedModal('setup');
-                }}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-muted)',
-                  border: '1px solid var(--border-subtle)',
-                  padding: '0.6rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.3rem',
-                }}
-              >
-                <Lock size={12} />
-                <span>Setup</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenLockedModal('buy');
-                }}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-muted)',
-                  border: '1px solid var(--border-subtle)',
-                  padding: '0.6rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.3rem',
-                }}
-              >
-                <span>Buy</span>
-                <span style={{ fontSize: '0.65rem', color: 'var(--status-warning)' }}>(Soon)</span>
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Media query styling for navbar */}
       <style>{`
-        @media (min-width: 860px) {
-          .desktop-nav { display: flex !important; }
-          .desktop-actions { display: flex !important; }
-          .mobile-toggle { display: none !important; }
+        @media (min-width: 900px) {
+          .desktop-nav {
+            display: flex !important;
+          }
+          .status-badge-desktop {
+            display: inline-flex !important;
+          }
+          .dev-lab-btn {
+            display: inline-flex !important;
+          }
+          .mobile-hamburger {
+            display: none !important;
+          }
         }
       `}</style>
     </header>

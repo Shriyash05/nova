@@ -20,8 +20,7 @@ export interface DeviceTelemetry {
   shortClaimCode: string;
   hardwareModel: string; // "ESP32-C3 Super Mini"
   firmwareVersion: string;
-  batteryPercent: number;
-  isCharging: boolean;
+  powerSource: 'USB-C 5V Bus' | 'usb_5v';
   status: DeviceStatus;
   oledState: OledScreenState;
   lastHeartbeat: string; // ISO 8601

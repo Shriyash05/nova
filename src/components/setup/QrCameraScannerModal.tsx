@@ -141,10 +141,30 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
     }
   }, [isOpen, startCamera, stopCamera]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        stopCamera();
+        onClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose, stopCamera]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="qr-scanner-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200"
+    >
       <div className="relative w-full max-w-md bg-[#0f1218] border border-cyan-500/30 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-[#141822]">
@@ -153,11 +173,13 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
               <Camera className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-white tracking-tight">Scan NOVA OLED QR</h3>
+              <h3 id="qr-scanner-title" className="text-sm font-semibold text-white tracking-tight">Scan NOVA OLED QR</h3>
               <p className="text-xs text-zinc-400">Point your camera at the OLED screen</p>
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close scanner dialog"
             onClick={() => {
               stopCamera();
               onClose();

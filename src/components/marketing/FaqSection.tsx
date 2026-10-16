@@ -1,179 +1,163 @@
 import React, { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { HelpCircle, ChevronDown } from 'lucide-react';
 
 interface FaqItem {
-  id: string;
-  question: string;
-  answer: string;
+  q: string;
+  a: string;
 }
 
-const FAQS: FaqItem[] = [
-  {
-    id: 'availability',
-    question: 'Can I purchase or order a physical NOVA device today?',
-    answer:
-      'No. NOVA is currently in the bench prototype development phase. We have verified the cloud backend, database schemas, encryption algorithms, and distributed rate limiting, but physical ESP32 firmware capture and injection-molded enclosure production are still in progress. Buy and Setup remain intentionally locked until end-to-end hardware validation is completed.',
-  },
-  {
-    id: 'mcu-tradeoff',
-    question: 'Why does the blueprint show an ESP32-S3 while the codebase references the ESP32-C3?',
-    answer:
-      'The initial firmware test harness and API contracts were prototyped around the single-core RISC-V ESP32-C3 Super Mini because of its compact size and ultra-low deep-sleep current. The industrial blueprint features the dual-core Xtensa ESP32-S3 SuperMini to evaluate dedicated vector DSP instructions for accelerating local WakeNet keyword spotting. Microcontroller selection remains an open engineering decision while we benchmark both chips on physical bench boards.',
-  },
-  {
-    id: 'battery-specs',
-    question: 'What is the battery life of the 1,000 mAh Li-Po cell shown on the blueprint?',
-    answer:
-      'The 1,000 mAh 3.7V Li-Po battery pack shown in the blueprint is an unconfirmed prototype target. While an ESP32 in deep-sleep drawing ~5µA theoretically lasts weeks, real runtime depends on microphone ADC duty cycles, Wi-Fi transmit bursts (up to 240mA), and OLED pixel activation. We will publish verified battery metrics only after physical bench testing under calibrated conditions.',
-  },
-  {
-    id: 'custom-hardware',
-    question: 'Can I build my own hardware prototype using off-the-shelf parts?',
-    answer:
-      'Yes. NOVA is designed with standard maker hardware: an ESP32 Super Mini development board, an SSD1306 0.96-inch monochrome OLED display (I²C 0x3C on GPIO8/GPIO9), and a MAX4466 analog electret microphone amplifier (ADC input GPIO1). Our API contracts, bootstrap hash protocols, and database schemas are open and documented in our repository.',
-  },
-  {
-    id: 'wifi-compatibility',
-    question: 'Does NOVA support 5GHz Wi-Fi networks?',
-    answer:
-      'No. The ESP32 SoC contains a 2.4GHz 802.11 b/g/n radio and does not support 5GHz Wi-Fi bands. If your router uses dual-band Wi-Fi, NOVA connects to the 2.4GHz network. The multi-Wi-Fi vault allows storing up to 5 networks with automatic failover.',
-  },
-  {
-    id: 'wake-word',
-    question: 'How does wake-word detection work, and does it listen continuously?',
-    answer:
-      'Wake-word detection is designed to run locally using Espressif WakeNet keyword spotting ("Hi ESP"). The analog microphone is sampled into a circular memory buffer on the ESP32. Audio packets are only transmitted to the cloud assistant pipeline after the wake word is detected.',
-  },
-  {
-    id: 'notion-permissions',
-    question: 'What access permissions does NOVA require for Notion?',
-    answer:
-      'NOVA connects via standard Notion OAuth 2.0. You select exactly which pages or databases NOVA has access to during the authorization screen. Access tokens are encrypted at rest with AES-256-GCM envelope encryption, and disconnecting Notion in the web portal immediately revokes access.',
-  },
-  {
-    id: 'mobile-app',
-    question: 'Do I need to install an iOS or Android app to set up NOVA?',
-    answer:
-      'No. NOVA is designed with zero mandatory mobile app downloads. Network provisioning is performed by connecting your phone or laptop directly to the device’s local SoftAP web portal at 192.168.4.1. Account pairing is completed by scanning the single-use 15-minute OLED QR code in any modern web browser.',
-  },
-  {
-    id: 'device-recovery',
-    question: 'What happens if I change my Wi-Fi network or lose my device key?',
-    answer:
-      'NOVA features a hardware recovery mechanism. Each physical unit possesses a unique bootstrap credential hash burned during initial manufacturing. If your Wi-Fi credentials change or device keys are rotated, scanning the Recovery QR restores connectivity and issues a fresh device key without wiping your saved notes, device identity, or Notion integration.',
-  },
-];
-
 export const FaqSection: React.FC = () => {
-  const [openId, setOpenId] = useState<string | null>('availability');
+  const [openIdx, setOpenIdx] = useState<number | null>(0);
 
-  const toggleFaq = (id: string) => {
-    setOpenId(openId === id ? null : id);
+  const faqs: FaqItem[] = [
+    {
+      q: 'Does NOVA require a monthly subscription fee?',
+      a: 'Never. You buy the hardware once and own it forever. There are zero cloud subscriptions, zero lock-ins, and zero recurring fees for voice memo capture or Notion syncing.',
+    },
+    {
+      q: 'How does the acoustic wake-word work offline without cloud servers?',
+      a: 'NOVA runs Espressif’s neural WakeNet (wn9s_hiesp) directly on the onboard ESP32-C3 160MHz RISC-V processor. The acoustic model spots “Hi ESP” locally within 120ms with zero network connection required.',
+    },
+    {
+      q: 'Does NOVA record my conversations in the background?',
+      a: 'Absolutely not. The MAX4466 analog microphone feeds a temporary ring buffer in volatile SRAM solely for wake-word detection. If the wake-word is not detected, audio samples are continuously discarded. Raw audio is never stored or transmitted to external servers.',
+    },
+    {
+      q: 'How does Notion database synchronization work?',
+      a: 'You authenticate your Notion workspace once through NOVA’s secure local Wi-Fi provisioning page or web console. When an utterance completes, NOVA sends an encrypted HTTPS payload via Supabase OAuth to automatically insert a formatted row into your designated Notion database.',
+    },
+    {
+      q: 'Can I write my own firmware or customize the OLED animations?',
+      a: 'Yes! NOVA is built on open ESP-IDF 6.1 and FreeRTOS. You can fork the C codebase, add custom OLED expressions, map new GPIO sensors, or train your own wake word with ESP-SR.',
+    },
+    {
+      q: 'How is NOVA powered?',
+      a: 'NOVA is powered via its standard USB-C port (5V). You can plug it into a laptop, charging dock, wall adapter, or a miniature portable keychain power bank for mobile use.',
+    },
+  ];
+
+  const toggle = (idx: number) => {
+    setOpenIdx(openIdx === idx ? null : idx);
   };
 
   return (
     <section
-      id="faq"
+      id="faqs"
       style={{
-        paddingTop: '5rem',
+        backgroundColor: 'var(--bg-body-yellow)',
+        paddingTop: '3rem',
         paddingBottom: '5rem',
-        borderBottom: '1px solid var(--border-subtle)',
       }}
     >
-      <div className="marketing-container">
-        {/* Section Heading */}
-        <div style={{ maxWidth: '640px', marginBottom: '3.5rem' }}>
-          <span
+      <div className="marketing-container" style={{ maxWidth: '800px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+          <div
             style={{
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--accent-cyan)',
-              display: 'block',
-              marginBottom: '0.5rem',
-            }}
-          >
-            Questions &amp; Answers
-          </span>
-          <h2
-            className="font-display"
-            style={{
-              fontSize: 'clamp(2rem, 3.5vw, 3rem)',
-              lineHeight: 1.1,
-              letterSpacing: '-0.025em',
-              color: 'var(--text-primary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              backgroundColor: '#FFFFFF',
+              border: '2px solid #000000',
+              boxShadow: '3px 3px 0px #000000',
+              borderRadius: '9999px',
+              padding: '0.35rem 1rem',
               marginBottom: '1rem',
+              fontFamily: 'var(--font-heading)',
+              fontSize: '0.82rem',
+              fontWeight: 900,
+              textTransform: 'uppercase',
             }}
           >
-            Clear answers. Zero marketing hype.
+            <HelpCircle size={14} style={{ color: '#FF9F1C' }} />
+            <span>Got Questions?</span>
+          </div>
+
+          <h2
+            style={{
+              fontFamily: 'var(--font-heading)',
+              fontSize: 'clamp(2.2rem, 4.5vw, 3.5rem)',
+              fontWeight: 900,
+              color: '#000000',
+              letterSpacing: '-0.04em',
+              marginBottom: '0.75rem',
+            }}
+          >
+            Frequently asked questions
           </h2>
-          <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            Have questions about NOVA hardware, security, or release plans? Here is everything you need to know directly from the engineering team.
+
+          <p
+            style={{
+              fontFamily: 'var(--font-body)',
+              fontSize: '1.05rem',
+              fontWeight: 500,
+              color: '#262626',
+              maxWidth: '520px',
+              margin: '0 auto',
+            }}
+          >
+            Everything you need to know about NOVA's hardware, privacy architecture, and open firmware.
           </p>
         </div>
 
-        {/* Accordion List */}
-        <div style={{ maxWidth: '820px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {FAQS.map((faq) => {
-            const isOpen = openId === faq.id;
+        {/* Accordion Pills */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {faqs.map((item, idx) => {
+            const isOpen = openIdx === idx;
             return (
               <div
-                key={faq.id}
+                key={idx}
                 style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  border: `1px solid ${isOpen ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
-                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFDF7',
+                  border: '2.5px solid #000000',
+                  boxShadow: isOpen ? '4px 4px 0px #000000' : '2px 2px 0px #000000',
+                  borderRadius: 'var(--radius-lg)',
                   overflow: 'hidden',
-                  transition: 'border-color var(--transition-fast)',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 <button
-                  onClick={() => toggleFaq(faq.id)}
-                  aria-expanded={isOpen}
-                  aria-controls={`faq-answer-${faq.id}`}
-                  id={`faq-question-${faq.id}`}
+                  onClick={() => toggle(idx)}
                   style={{
                     width: '100%',
-                    padding: '1.25rem 1.5rem',
-                    textAlign: 'left',
-                    background: 'none',
+                    padding: '1.35rem 1.6rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
+                    textAlign: 'left',
+                    fontFamily: 'var(--font-heading)',
+                    fontSize: '1.08rem',
+                    fontWeight: 800,
+                    color: '#000000',
+                    cursor: 'pointer',
                     gap: '1rem',
-                    color: 'var(--text-primary)',
                   }}
+                  aria-expanded={isOpen}
                 >
-                  <span style={{ fontSize: '1.05rem', fontWeight: 600, lineHeight: 1.4 }}>
-                    {faq.question}
-                  </span>
-                  <ChevronDown
-                    size={18}
+                  <span>{item.q}</span>
+                  <div
                     style={{
-                      transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition: 'transform var(--transition-fast)',
-                      color: isOpen ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                      transform: isOpen ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.2s ease',
                       flexShrink: 0,
                     }}
-                  />
+                  >
+                    <ChevronDown size={20} />
+                  </div>
                 </button>
 
                 {isOpen && (
                   <div
-                    id={`faq-answer-${faq.id}`}
-                    role="region"
-                    aria-labelledby={`faq-question-${faq.id}`}
                     style={{
-                      padding: '0 1.5rem 1.25rem 1.5rem',
-                      color: 'var(--text-secondary)',
-                      fontSize: '0.925rem',
+                      padding: '0 1.6rem 1.35rem',
+                      fontFamily: 'var(--font-body)',
+                      fontSize: '0.96rem',
                       lineHeight: 1.65,
-                      borderTop: '1px solid var(--border-subtle)',
+                      color: '#333333',
+                      borderTop: '1.5px solid #F0ECE1',
                       paddingTop: '1rem',
                     }}
                   >
-                    {faq.answer}
+                    {item.a}
                   </div>
                 )}
               </div>

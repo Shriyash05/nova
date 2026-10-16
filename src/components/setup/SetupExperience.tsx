@@ -53,7 +53,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
     macAddress: string;
     serialNumber: string;
     status: string;
-    batteryPercent: number;
+    powerSource?: string;
     rssi: number | null;
     lastHeartbeat: string | null;
     firmwareVersion: string;
@@ -108,7 +108,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
           macAddress: res.data.wifi?.macAddress || '48:F6:EE:17:34:D8',
           serialNumber: res.data.device.serialNumber,
           status: res.data.device.status,
-          batteryPercent: res.data.device.batteryPercent || 100,
+          powerSource: 'USB-C 5V Bus',
           rssi: res.data.wifi?.rssi ?? -55,
           lastHeartbeat: res.data.device.lastHeartbeat,
           firmwareVersion: res.data.device.firmwareVersion || '1.2.0',
@@ -486,7 +486,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                     My Registered Devices
                   </div>
                   {userDevices.length === 0 ? (
-                    <div style={{ fontSize: '0.8rem', color: '#6b7280', padding: '8px' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary, #94a3b8)', padding: '8px' }}>
                       No devices bound to this account yet. Pair with OLED QR below.
                     </div>
                   ) : (
@@ -621,7 +621,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
       </header>
 
       {/* Main Container */}
-      <main style={{ maxWidth: '880px', margin: '0 auto', padding: '2.5rem 1.5rem 4rem' }}>
+      <main style={{ maxWidth: '880px', margin: '0 auto', padding: '2.5rem clamp(0.75rem, 4vw, 1.5rem) 4rem' }}>
         {/* ===================================================================
             VIEW A: UNPAIRED / PAIRING FLOW
             =================================================================== */}
@@ -639,7 +639,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
                 gap: '1.5rem',
                 alignItems: 'start',
               }}
@@ -686,7 +686,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '0.85rem 0' }}>
                     <div style={{ flex: 1, height: '1px', backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                    <span style={{ fontSize: '0.72rem', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       Or enter token / ID manually
                     </span>
                     <div style={{ flex: 1, height: '1px', backgroundColor: 'rgba(255,255,255,0.08)' }} />
@@ -1033,9 +1033,9 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '0.74rem', color: '#8e96a4', textTransform: 'uppercase' }}>Battery</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f2f4f8', marginTop: '0.15rem' }}>
-                    {deviceData?.batteryPercent ?? 100}%
+                  <div style={{ fontSize: '0.74rem', color: '#8e96a4', textTransform: 'uppercase' }}>Power Source</div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#00e5ff', marginTop: '0.15rem' }}>
+                    USB-C 5V Bus
                   </div>
                 </div>
 
@@ -1066,7 +1066,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
                 gap: '1.5rem',
               }}
             >
@@ -1207,6 +1207,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                       <input
                         type="text"
                         placeholder="Wi-Fi SSID"
+                        aria-label="Wi-Fi Network Name (SSID)"
                         value={newSsid}
                         onChange={(e) => setNewSsid(e.target.value)}
                         required
@@ -1222,6 +1223,7 @@ export const SetupExperience: React.FC<SetupExperienceProps> = ({
                       <input
                         type="password"
                         placeholder="Wi-Fi Password"
+                        aria-label="Wi-Fi Password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         style={{

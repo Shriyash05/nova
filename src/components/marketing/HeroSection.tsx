@@ -1,50 +1,57 @@
-import React from 'react';
-import { ArrowRight, Cpu, Radio, Lock } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowRight, Sparkles, ShieldCheck, Zap, Database } from 'lucide-react';
+import { IsometricHeroRobot } from '../illustrations/IsometricHeroRobot';
+import { StarBubbleSticker, LightningBoltSticker } from '../illustrations/RetroStickers';
 
 export interface HeroSectionProps {
-  onOpenLockedModal: (actionType: 'buy' | 'setup') => void;
-  onExploreClick: () => void;
-  onHowItWorksClick: () => void;
-  onSignupClick: () => void;
+  onOpenPreorderModal: () => void;
+  onExploreClick?: () => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
-  onOpenLockedModal,
+  onOpenPreorderModal,
   onExploreClick,
-  onHowItWorksClick,
-  onSignupClick,
 }) => {
+  const [robotMood, setRobotMood] = useState<'idle' | 'wake' | 'listening' | 'processing' | 'success'>('idle');
+
   return (
     <section
       style={{
+        backgroundColor: 'var(--bg-hero-pink)',
         paddingTop: '3.5rem',
-        paddingBottom: '4.5rem',
-        borderBottom: '1px solid var(--border-subtle)',
+        paddingBottom: '2rem',
         position: 'relative',
+        overflow: 'hidden',
       }}
     >
-      <div className="marketing-container">
-        {/* Top Concept Pre-Hardware Notice */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.35rem 0.75rem',
-              fontSize: '0.75rem',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            <Radio size={12} style={{ color: 'var(--accent-cyan)' }} />
-            <span>Industrial Design Concept &bull; Pre-Hardware Prototype</span>
-          </div>
-        </div>
+      {/* Decorative Floating Retro Stickers in the background */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '30px',
+          left: '4%',
+          opacity: 0.9,
+          transform: 'rotate(-8deg)',
+        }}
+        className="animate-float"
+      >
+        <StarBubbleSticker size={60} />
+      </div>
 
-        {/* Editorial Grid: Copy Left, Hero Render Right */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '80px',
+          left: '46%',
+          opacity: 0.8,
+          transform: 'rotate(12deg)',
+        }}
+        className="animate-float-delayed"
+      >
+        <LightningBoltSticker size={48} />
+      </div>
+
+      <div className="marketing-container" style={{ position: 'relative', zIndex: 5 }}>
         <div
           style={{
             display: 'grid',
@@ -54,231 +61,225 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           }}
           className="hero-grid"
         >
-          {/* Left Column: Headline & Value Proposition */}
+          {/* Left Column: Playful, Massive Display Typography */}
           <div>
-            <h1
-              className="font-display"
+            {/* The "super hello" Puffy Header from the reference image */}
+            <div
               style={{
-                fontSize: 'clamp(2.75rem, 5.5vw, 4.5rem)',
-                lineHeight: 1.04,
-                letterSpacing: '-0.03em',
-                color: 'var(--text-primary)',
-                marginBottom: '1.25rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                backgroundColor: '#FFFFFF',
+                border: '2.5px solid #000000',
+                boxShadow: '3px 3px 0px #000000',
+                borderRadius: '9999px',
+                padding: '0.35rem 1.1rem',
+                marginBottom: '1.5rem',
               }}
             >
-              Small enough to carry. Designed to respond.
+              <Sparkles size={14} style={{ color: '#FF9F1C' }} />
+              <span
+                style={{
+                  fontFamily: 'var(--font-heading)',
+                  fontSize: '0.88rem',
+                  fontWeight: 900,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  color: '#000000',
+                }}
+              >
+                Meet NOVA 1.0 — Pocket Hardware
+              </span>
+            </div>
+
+            {/* Giant Graphic Headline */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 'clamp(3.5rem, 8.5vw, 6.5rem)',
+                  fontWeight: 900,
+                  lineHeight: 0.92,
+                  letterSpacing: '-0.05em',
+                  color: '#FFFFFF',
+                  textShadow: '3px 3px 0px #000000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000, 4px 4px 0px #000',
+                  userSelect: 'none',
+                }}
+              >
+                hello
+                <span
+                  style={{
+                    display: 'block',
+                    color: '#000000',
+                    textShadow: 'none',
+                    letterSpacing: '-0.04em',
+                  }}
+                >
+                  nova
+                </span>
+              </div>
+            </div>
+
+            {/* Sub-headline: "A design agency....kinda" -> "A tiny voice companion....kinda" */}
+            <h1
+              style={{
+                fontFamily: 'var(--font-heading)',
+                fontSize: 'clamp(1.5rem, 3.2vw, 2.35rem)',
+                fontWeight: 900,
+                color: '#000000',
+                lineHeight: 1.15,
+                letterSpacing: '-0.03em',
+                marginBottom: '0.75rem',
+              }}
+            >
+              A tiny voice companion....kinda
             </h1>
 
+            {/* One-sentence hook matching reference */}
             <p
               style={{
-                fontSize: 'clamp(1rem, 1.25vw, 1.15rem)',
-                lineHeight: 1.6,
-                color: 'var(--text-secondary)',
+                fontFamily: 'var(--font-body)',
+                fontSize: 'clamp(1.05rem, 1.4vw, 1.25rem)',
+                fontWeight: 600,
+                color: '#222222',
+                lineHeight: 1.5,
+                maxWidth: '480px',
                 marginBottom: '2rem',
-                maxWidth: '520px',
               }}
             >
-              NOVA is an ambient voice-assistant keychain enclosed in a precision transparent enclosure. Engineered around an animated monochrome OLED display, acoustic wake-word spotting, and seamless Notion workspace synchronization.
+              Zero monthly subscriptions. Instant local wake-word on ESP32-C3 RISC-V. An expressive OLED face on your keychain.
             </p>
 
-            {/* CTAs */}
+            {/* CTA Buttons */}
             <div
               style={{
                 display: 'flex',
                 flexWrap: 'wrap',
-                gap: '0.75rem',
+                gap: '1rem',
                 alignItems: 'center',
                 marginBottom: '2.5rem',
               }}
             >
+              {/* The Orange Amber Button from reference "See Plans" */}
               <button
-                onClick={onExploreClick}
+                onClick={onOpenPreorderModal}
+                className="btn-brutal btn-brutal-amber"
                 style={{
-                  backgroundColor: 'var(--accent-cyan)',
-                  color: 'var(--text-on-accent)',
-                  padding: '0.85rem 1.6rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  transition: 'opacity var(--transition-fast)',
+                  fontSize: '1.1rem',
+                  padding: '1rem 2.25rem',
                 }}
               >
-                <span>Explore NOVA</span>
-                <ArrowRight size={16} />
+                <span>Pre-order NOVA — $49</span>
+                <ArrowRight size={18} />
               </button>
 
-              <button
-                onClick={onSignupClick}
-                style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-strong)',
-                  padding: '0.85rem 1.4rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.95rem',
-                  fontWeight: 600,
-                }}
-              >
-                Get Launch Updates
-              </button>
-
-              <button
-                onClick={onHowItWorksClick}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-subtle)',
-                  padding: '0.85rem 1.2rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.9rem',
-                }}
-              >
-                How It Works
-              </button>
-
-              <button
-                onClick={() => onOpenLockedModal('buy')}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-muted)',
-                  border: '1px dashed var(--border-subtle)',
-                  padding: '0.85rem 1.1rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.85rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                }}
-                title="Pre-orders currently locked"
-              >
-                <Lock size={13} />
-                <span>Buy NOVA</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--status-warning)' }}>Coming Soon</span>
-              </button>
+              {onExploreClick && (
+                <button
+                  onClick={onExploreClick}
+                  className="btn-brutal btn-brutal-white"
+                  style={{
+                    fontSize: '1rem',
+                    padding: '1rem 1.75rem',
+                  }}
+                >
+                  <span>See How It Works</span>
+                </button>
+              )}
             </div>
 
-            {/* Hardware Verification Disclaimer */}
+            {/* Trust / Spec Badges */}
             <div
               style={{
-                borderLeft: '2px solid var(--border-strong)',
-                paddingLeft: '1rem',
-                maxWidth: '480px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.65rem',
               }}
             >
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'block' }}>
-                <strong style={{ color: 'var(--text-secondary)' }}>Hardware Status Disclosure:</strong> Cloud backend, distributed rate limiting, and encrypted Wi-Fi vault APIs are verified and live. Physical enclosure tooling, battery integration (1,000 mAh target), and ESP32 firmware are in active prototype development.
-              </span>
-            </div>
-          </div>
-
-          {/* Right Column: Hero Concept Render */}
-          <div style={{ position: 'relative' }}>
-            <div
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-strong)',
-                borderRadius: 'var(--radius-lg)',
-                overflow: 'hidden',
-                position: 'relative',
-              }}
-            >
-              <img
-                src="/images/nova-transparent-hero.jpg"
-                alt="NOVA transparent pocket keychain voice assistant concept render showing clear polycarbonate enclosure, exposed internal electronics, 0.96-inch monochrome OLED with cyan pixel smiley face, and metallic keychain loop"
-                width={1280}
-                height={720}
-                loading="eager"
-                style={{
-                  width: '100%',
-                  height: 'auto',
-                  display: 'block',
-                  objectFit: 'cover',
-                }}
-              />
-
-              {/* Render Technical Overlay Bar */}
-              <div
-                style={{
-                  padding: '0.85rem 1.25rem',
-                  backgroundColor: 'var(--bg-surface-elevated)',
-                  borderTop: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '0.5rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Cpu size={14} style={{ color: 'var(--accent-cyan)' }} />
-                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    NOVA Prototype Concept Render
-                  </span>
-                </div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  Transparent Shell &bull; 0.96&quot; OLED (• ‿ •) &bull; 35&times;50&times;15mm
-                </span>
+              <div className="badge-brutal badge-brutal-white">
+                <ShieldCheck size={14} style={{ color: '#00B894' }} />
+                <span>100% Offline WakeNet</span>
+              </div>
+              <div className="badge-brutal badge-brutal-white">
+                <Zap size={14} style={{ color: '#FF9F1C' }} />
+                <span>ESP32-C3 160MHz</span>
+              </div>
+              <div className="badge-brutal badge-brutal-white">
+                <Database size={14} style={{ color: '#6C5CE7' }} />
+                <span>Direct Notion Sync</span>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Verified Hardware Component Badges Strip */}
-        <div
-          style={{
-            marginTop: '3.5rem',
-            paddingTop: '2rem',
-            borderTop: '1px solid var(--border-subtle)',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '1.25rem',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Form Factor
-            </span>
-            <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              35 &times; 50 &times; 15 mm Keychain
-            </span>
-          </div>
+          {/* Right Column: Handcrafted Isometric Robot Companion */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              position: 'relative',
+            }}
+          >
+            <IsometricHeroRobot
+              currentExpression={robotMood}
+              onExpressionChange={setRobotMood}
+            />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Visual Feedback
-            </span>
-            <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              0.96&quot; Monochrome OLED (• ‿ •)
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Microcontroller
-            </span>
-            <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              ESP32-C3 / S3 (In Evaluation)
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>
-              Acoustic Input
-            </span>
-            <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              MAX4466 Electret Capsule
-            </span>
+            {/* Interactive Mood Selector underneath Robot */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                marginTop: '1rem',
+                backgroundColor: '#FFFFFF',
+                border: '2px solid #000000',
+                boxShadow: '3px 3px 0px #000000',
+                borderRadius: '9999px',
+                padding: '0.35rem 0.65rem',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--font-heading)',
+                  fontSize: '0.72rem',
+                  fontWeight: 900,
+                  textTransform: 'uppercase',
+                  color: '#666',
+                  paddingLeft: '0.35rem',
+                }}
+              >
+                Mood:
+              </span>
+              {(['idle', 'wake', 'listening', 'processing', 'success'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setRobotMood(m)}
+                  style={{
+                    fontFamily: 'var(--font-heading)',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    padding: '0.2rem 0.55rem',
+                    borderRadius: '9999px',
+                    border: robotMood === m ? '1.5px solid #000' : '1.5px solid transparent',
+                    backgroundColor: robotMood === m ? 'var(--btn-amber)' : 'transparent',
+                    color: '#000',
+                    cursor: 'pointer',
+                    transition: 'all 0.1s ease',
+                  }}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       <style>{`
-        @media (min-width: 960px) {
+        @media (min-width: 900px) {
           .hero-grid {
-            grid-template-columns: 1.05fr 0.95fr !important;
+            grid-template-columns: 1.15fr 0.85fr !important;
           }
         }
       `}</style>

@@ -10,9 +10,9 @@
 
 html {
   font-size: 16px;
-  background-color: var(--bg-app);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
+  background-color: var(--bg-body-yellow);
+  color: var(--text-black);
+  font-family: var(--font-body);
   -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -23,8 +23,8 @@ html {
 body {
   min-height: 100%;
   min-height: 100dvh;
-  background-color: var(--bg-app);
-  color: var(--text-primary);
+  background-color: var(--bg-body-yellow);
+  color: var(--text-black);
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
@@ -43,10 +43,12 @@ body {
   position: absolute;
   top: -100px;
   left: 1rem;
-  background: var(--accent-cyan);
-  color: var(--text-on-accent);
+  background: var(--btn-amber);
+  color: #000000;
+  border: 2px solid #000000;
+  box-shadow: 2px 2px 0px #000000;
   padding: 0.5rem 1rem;
-  font-weight: 600;
+  font-weight: 800;
   font-size: 0.875rem;
   z-index: 9999;
   border-radius: var(--radius-sm);
@@ -62,29 +64,20 @@ body {
 /* Focus Visibility */
 :focus-visible {
   outline: 2px solid var(--accent-cyan);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 /* Typography Defaults */
 h1, h2, h3, h4, h5, h6 {
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-}
-
-.font-display {
+  color: var(--text-black);
   font-family: var(--font-display);
   font-weight: 800;
-  font-stretch: 65%;
-  font-variation-settings: 'wdth' 65, 'wght' 800;
-  letter-spacing: -0.02em;
-  line-height: 1.05;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
 }
 
 p {
-  color: var(--text-secondary);
+  color: var(--text-body);
   line-height: 1.6;
   font-size: 1rem;
 }
@@ -99,93 +92,41 @@ button, input, select, textarea {
 
 button {
   cursor: pointer;
-  touch-action: manipulation;
+  user-select: none;
+  background: transparent;
 }
 
 a {
-  color: var(--accent-cyan);
+  color: inherit;
   text-decoration: none;
 }
 
-a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-/* Utility Containers */
+/* Layout Containers */
 .marketing-container {
-  max-width: var(--max-content-width);
-  margin: 0 auto;
   width: 100%;
-  padding-left: 1.25rem;
-  padding-right: 1.25rem;
+  max-width: var(--max-content-width);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
 }
 
-@media (min-width: 640px) {
-  .marketing-container {
-    padding-left: 2rem;
-    padding-right: 2rem;
-  }
-}
-
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   .marketing-container {
     padding-left: 2.5rem;
     padding-right: 2.5rem;
   }
 }
 
-.app-container {
-  max-width: var(--max-flow-width);
-  margin: 0 auto;
-  width: 100%;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  padding: 0 1.25rem;
-  padding-top: max(1.5rem, var(--safe-top));
-  padding-bottom: max(2rem, var(--safe-bottom));
-  position: relative;
-}
-
-/* Accessible Solid Surface Cards (No generic drop shadows at rest) */
-.solid-card {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 1.5rem;
-}
-
-.solid-card-elevated {
-  background-color: var(--bg-surface-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: 1.5rem;
-}
-
-/* Spinner Animation */
-@keyframes spin-loader {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
+@media (min-width: 1280px) {
+  .marketing-container {
+    padding-left: 2rem;
+    padding-right: 2rem;
   }
 }
 
-.spinner {
-  animation: spin-loader 1s linear infinite;
-}
-
-/* Screen reader only */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border-width: 0;
+/* Selection Color */
+::selection {
+  background-color: var(--bg-hero-pink);
+  color: #000000;
 }

@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -10,11 +12,111 @@ const { Pool } = pg;
 const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
 let pool: pg.Pool | null = null;
 
+const SUPABASE_ROOT_CA_2021 = `-----BEGIN CERTIFICATE-----
+MIIDxDCCAqygAwIBAgIUbLxMod62P2ktCiAkxnKJwtE9VPYwDQYJKoZIhvcNAQEL
+BQAwazELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5l
+dyBDYXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJh
+c2UgUm9vdCAyMDIxIENBMB4XDTIxMDQyODEwNTY1M1oXDTMxMDQyNjEwNTY1M1ow
+azELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5ldyBD
+YXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJhc2Ug
+Um9vdCAyMDIxIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqQXW
+QyHOB+qR2GJobCq/CBmQ40G0oDmCC3mzVnn8sv4XNeWtE5XcEL0uVih7Jo4Dkx1Q
+DmGHBH1zDfgs2qXiLb6xpw/CKQPypZW1JssOTMIfQppNQ87K75Ya0p25Y3ePS2t2
+GtvHxNjUV6kjOZjEn2yWEcBdpOVCUYBVFBNMB4YBHkNRDa/+S4uywAoaTWnCJLUi
+cvTlHmMw6xSQQn1UfRQHk50DMCEJ7Cy1RxrZJrkXXRP3LqQL2ijJ6F4yMfh+Gyb4
+O4XajoVj/+R4GwywKYrrS8PrSNtwxr5StlQO8zIQUSMiq26wM8mgELFlS/32Uclt
+NaQ1xBRizkzpZct9DwIDAQABo2AwXjALBgNVHQ8EBAMCAQYwHQYDVR0OBBYEFKjX
+uXY32CztkhImng4yJNUtaUYsMB8GA1UdIwQYMBaAFKjXuXY32CztkhImng4yJNUt
+aUYsMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAB8spzNn+4VU
+tVxbdMaX+39Z50sc7uATmus16jmmHjhIHz+l/9GlJ5KqAMOx26mPZgfzG7oneL2b
+VW+WgYUkTT3XEPFWnTp2RJwQao8/tYPXWEJDc0WVQHrpmnWOFKU/d3MqBgBm5y+6
+jB81TU/RG2rVerPDWP+1MMcNNy0491CTL5XQZ7JfDJJ9CCmXSdtTl4uUQnSuv/Qx
+Cea13BX2ZgJc7Au30vihLhub52De4P/4gonKsNHYdbWjg7OWKwNv/zitGDVDB9Y2
+CMTyZKG3XEu5Ghl1LEnI3QmEKsqaCLv12BnVjbkSeZsMnevJPs1Ye6TjjJwdik5P
+o/bKiIz+Fq8=
+-----END CERTIFICATE-----`;
+
+/**
+ * Normalizes custom TLS Certificate Authority (CA) data provided via environment variables.
+ * Supports:
+ * - Standard multiline PEM certificates
+ * - Escaped newline PEM strings ("\n") typical of Vercel dashboard env variables
+ * - Base64-encoded PEM strings
+ * - Relative or absolute paths to certificate files on disk
+ */
+export function parseSslCa(rawCa?: string): string | undefined {
+  if (!rawCa) return undefined;
+  let trimmed = rawCa.trim();
+  if (!trimmed) return undefined;
+
+  // 1. If it's a file path that exists on disk, read its content
+  if (!trimmed.includes('\n') && (trimmed.endsWith('.crt') || trimmed.endsWith('.pem') || trimmed.includes('/') || trimmed.includes('\\'))) {
+    try {
+      if (fs.existsSync(trimmed)) {
+        return fs.readFileSync(trimmed, 'utf8').trim();
+      }
+    } catch {
+      // Proceed with content checks if file read fails
+    }
+  }
+
+  // 2. Unescape literal '\n' sequences from single-line environment configurations
+  if (trimmed.includes('\\n')) {
+    trimmed = trimmed.replace(/\\n/g, '\n');
+  }
+
+  // 3. Direct PEM header match
+  if (trimmed.includes('-----BEGIN CERTIFICATE-----')) {
+    return trimmed;
+  }
+
+  // 4. Base64-encoded PEM certificate check
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    if (decoded.includes('-----BEGIN CERTIFICATE-----')) {
+      return decoded.trim();
+    }
+  } catch {
+    // Not a valid base64 payload
+  }
+
+  return trimmed;
+}
+
 function getPool(): pg.Pool | null {
   if (!pool && process.env.DATABASE_URL) {
+    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    let ca = parseSslCa(process.env.DATABASE_SSL_CA || process.env.SUPABASE_SSL_CA);
+
+    // Fallback: If no explicit CA is configured and connecting to a Supabase pooler,
+    // load the bundled Supabase Root 2021 CA certificate to ensure strict TLS verification succeeds.
+    if (!ca && (process.env.DATABASE_URL.includes('supabase.co') || process.env.DATABASE_URL.includes('pooler.supabase.com'))) {
+      try {
+        const bundledPath = path.resolve(process.cwd(), 'api/certs/supabase-ca.pem');
+        if (fs.existsSync(bundledPath)) {
+          ca = fs.readFileSync(bundledPath, 'utf8').trim();
+        }
+      } catch {
+        // Fallback to embedded certificate string
+      }
+      if (!ca) {
+        ca = SUPABASE_ROOT_CA_2021;
+      }
+    }
+
+    // Enforce TLS certificate verification in production and environments with CA certificates configured.
+    // In test runners connecting against remote Supabase poolers without pre-installed root CAs,
+    // allow connecting unless DATABASE_SSL_REJECT_UNAUTHORIZED is explicitly enforced.
+    const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== undefined
+      ? process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'true'
+      : Boolean(ca || (isProduction && !isTestEnv));
+
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // Required for Supabase pooler connection
+      ssl: {
+        rejectUnauthorized,
+        ...(ca ? { ca } : {}),
+      },
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -139,7 +241,7 @@ interface UserDeviceRecord {
   notion_authorized: boolean;
 }
 
-async function ensureUserTables(): Promise<void> {
+export async function ensureUserTables(): Promise<void> {
   const p = getPool();
   if (!p) return;
   try {
@@ -161,12 +263,37 @@ async function ensureUserTables(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (user_id, device_id)
       );
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_devices_device ON user_devices(device_id);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
     `);
   } catch {
     // Suppress if already exists
   }
+}
+
+export async function getUserIdFromSession(token: string): Promise<string | null> {
+  if (!token) return null;
+  // 1. Direct user session lookup
+  try {
+    const userSessRows = await queryDb<{ user_id: string }>(
+      'SELECT user_id FROM user_sessions WHERE id = $1 AND expires_at > NOW()',
+      [token]
+    );
+    if (userSessRows.length > 0 && userSessRows[0].user_id) {
+      return userSessRows[0].user_id;
+    }
+  } catch {
+    // If table doesn't exist yet, return null
+  }
+
+  return null;
 }
 
 // -----------------------------------------------------------------------------
@@ -637,6 +764,12 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-nova-key, x-nova-bootstrap, x-nova-recovery, x-idempotency-key, If-None-Match');
   res.setHeader('Access-Control-Expose-Headers', 'ETag');
 
+  // Defensive HTTP Security Headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
   if (req.method === 'OPTIONS') {
     if (origin && !isOriginAllowed) {
       res.statusCode = 403;
@@ -651,6 +784,10 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method?.toUpperCase() || 'GET';
+
+  if (!req.query) {
+    req.query = Object.fromEntries(url.searchParams.entries());
+  }
 
   if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
     req.body = await parseJsonBody(req);
@@ -801,7 +938,9 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
     // =========================================================================
     // 1.1 POST /api/v1/auth/google
-    // User authentication with Google ID token or dev one-tap profile.
+    // User authentication with Google ID token credential.
+    // Enforces cryptographic tokeninfo verification with Google.
+    // Unauthenticated fallback is strictly rejected (no raw email injection).
     // Creates or logs in user, returning durable session token and user profile.
     // =========================================================================
     if (pathname === '/api/v1/auth/google' && method === 'POST') {
@@ -811,31 +950,98 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
       await ensureUserTables();
 
-      let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-      let name = typeof req.body?.name === 'string' ? req.body.name.trim() : 'NOVA User';
-      let avatarUrl = typeof req.body?.avatarUrl === 'string' ? req.body.avatarUrl.trim() : null;
-      let googleId = typeof req.body?.googleId === 'string' ? req.body.googleId.trim() : null;
-
       const credential = req.body?.credential;
-      if (typeof credential === 'string' && credential.trim()) {
-        try {
-          const gRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential.trim())}`);
-          if (gRes.ok) {
-            const gData = await gRes.json() as { email?: string; name?: string; picture?: string; sub?: string };
-            if (gData.email) email = gData.email.toLowerCase();
-            if (gData.name) name = gData.name;
-            if (gData.picture) avatarUrl = gData.picture;
-            if (gData.sub) googleId = gData.sub;
-          }
-        } catch {
-          // If offline / mocked in testing, fall back to body fields
+      if (typeof credential !== 'string' || !credential.trim()) {
+        sendJson(res, 401, {
+          success: false,
+          error: {
+            code: 'INVALID_CREDENTIALS',
+            message: 'A valid Google ID token credential is required for user authentication.',
+          },
+        });
+        return;
+      }
+
+      let email = '';
+      let name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : 'NOVA User';
+      let avatarUrl = typeof req.body?.avatarUrl === 'string' && req.body.avatarUrl.trim() ? req.body.avatarUrl.trim() : null;
+      let googleId: string | null = null;
+
+      try {
+        const gRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential.trim())}`);
+        if (!gRes.ok) {
+          sendJson(res, 401, {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Google token verification failed.',
+            },
+          });
+          return;
         }
+
+        const gData = await gRes.json() as {
+          aud?: string;
+          email?: string;
+          email_verified?: string | boolean;
+          name?: string;
+          picture?: string;
+          sub?: string;
+        };
+
+        const expectedClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID;
+        if (expectedClientId && gData.aud !== expectedClientId) {
+          sendJson(res, 401, {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Token audience mismatch: Google credential was not issued for this application.',
+            },
+          });
+          return;
+        }
+
+        if (gData.email_verified === false || gData.email_verified === 'false') {
+          sendJson(res, 401, {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Google account email is not verified.',
+            },
+          });
+          return;
+        }
+
+        if (gData.email && typeof gData.email === 'string') {
+          email = gData.email.trim().toLowerCase();
+        }
+        if (gData.name && typeof gData.name === 'string' && gData.name.trim()) {
+          name = gData.name.trim();
+        }
+        if (gData.picture && typeof gData.picture === 'string' && gData.picture.trim()) {
+          avatarUrl = gData.picture.trim();
+        }
+        if (gData.sub && typeof gData.sub === 'string' && gData.sub.trim()) {
+          googleId = gData.sub.trim();
+        }
+      } catch {
+        sendJson(res, 401, {
+          success: false,
+          error: {
+            code: 'INVALID_CREDENTIALS',
+            message: 'Failed to verify Google token credential with identity provider.',
+          },
+        });
+        return;
       }
 
       if (!email || !email.includes('@')) {
-        sendJson(res, 400, {
+        sendJson(res, 401, {
           success: false,
-          error: { code: 'INVALID_CREDENTIALS', message: 'A valid email is required for user authentication.' },
+          error: {
+            code: 'INVALID_CREDENTIALS',
+            message: 'Google credential payload does not contain a valid email address.',
+          },
         });
         return;
       }
@@ -856,7 +1062,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       const sessionToken = `usess_${crypto.randomBytes(24).toString('hex')}`;
       const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
       await queryDb(
-        `INSERT INTO pairing_sessions (id, device_id, expires_at)
+        `INSERT INTO user_sessions (id, user_id, expires_at)
          VALUES ($1, $2, $3)
          ON CONFLICT (id) DO NOTHING;`,
         [sessionToken, userId, expiresAt]
@@ -875,33 +1081,52 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     // =========================================================================
     // 1.2 GET /api/v1/user/devices
     // Returns all physical devices registered and claimed by the authenticated user.
-    // Preserves real-time online status, Wi-Fi credentials, and Notion authorization.
+    // Enforces session token authentication. Rejects unauthenticated user ID overrides (IDOR).
+    // If a custom userId is provided in header or query, it MUST match the authenticated caller.
     // =========================================================================
     if (pathname === '/api/v1/user/devices' && method === 'GET') {
       await ensureUserTables();
 
       const authHeader = getHeader(req, 'authorization');
-      const customUserId = getHeader(req, 'x-nova-user-id') || (req.query?.userId as string);
-      let targetUserId = customUserId;
-
-      if (!targetUserId && authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.substring(7).trim();
-        const sessRows = await queryDb<{ device_id: string }>(
-          'SELECT device_id FROM pairing_sessions WHERE id = $1 AND expires_at > NOW()',
-          [token]
-        );
-        if (sessRows.length > 0) {
-          targetUserId = sessRows[0].device_id;
-        }
-      }
-
-      if (!targetUserId) {
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
         sendJson(res, 401, {
           success: false,
           error: { code: 'UNAUTHORIZED', message: 'User authentication session is required.' },
         });
         return;
       }
+
+      const token = authHeader.substring(7).trim();
+      if (!token) {
+        sendJson(res, 401, {
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'User authentication session token must not be empty.' },
+        });
+        return;
+      }
+
+      const authenticatedUserId = await getUserIdFromSession(token);
+      if (!authenticatedUserId) {
+        sendJson(res, 401, {
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Invalid or expired user session token.' },
+        });
+        return;
+      }
+      const customUserId = getHeader(req, 'x-nova-user-id') || (req.query?.userId as string) || url.searchParams.get('userId');
+
+      if (customUserId && customUserId !== authenticatedUserId) {
+        sendJson(res, 403, {
+          success: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Access denied: cannot query devices for another user account.',
+          },
+        });
+        return;
+      }
+
+      const targetUserId = authenticatedUserId;
 
       const devices = await queryDb<UserDeviceRecord>(
         `SELECT 
@@ -931,15 +1156,50 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
 
     // =========================================================================
     // 1.3 POST /api/v1/user/devices/link
-    // Explicitly link or set primary device for a user
+    // Explicitly link or set primary device for a user.
+    // Requires authenticated caller authorization matching userId or service role.
+    // Prevents arbitrary unauthenticated device linkage and IDOR account tampering.
     // =========================================================================
     if (pathname === '/api/v1/user/devices/link' && method === 'POST') {
       await ensureUserTables();
-      const userId = (req.body?.userId as string) || getHeader(req, 'x-nova-user-id');
+
+      const authHeader = getHeader(req, 'authorization');
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.NOVA_SERVICE_ROLE_KEY;
+      const isServiceRole = Boolean(
+        serviceRoleKey &&
+        (authHeader === `Bearer ${serviceRoleKey}` || getHeader(req, 'x-service-role-key') === serviceRoleKey)
+      );
+
+      let authenticatedUserId: string | null = null;
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.substring(7).trim();
+        if (token && (!serviceRoleKey || token !== serviceRoleKey)) {
+          authenticatedUserId = await getUserIdFromSession(token);
+        }
+      }
+
+      if (!isServiceRole && !authenticatedUserId) {
+        sendJson(res, 401, {
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'User session authentication required to link devices.' },
+        });
+        return;
+      }
+
+      const requestedUserId = (req.body?.userId as string) || getHeader(req, 'x-nova-user-id');
+      if (!isServiceRole && requestedUserId && requestedUserId !== authenticatedUserId) {
+        sendJson(res, 403, {
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Access denied: cannot link devices to another user account.' },
+        });
+        return;
+      }
+
+      const effectiveUserId = isServiceRole ? (requestedUserId || authenticatedUserId) : authenticatedUserId;
       const targetDeviceId = req.body?.deviceId as string;
       const label = (req.body?.label as string) || 'My NOVA Keychain';
 
-      if (!userId || !targetDeviceId) {
+      if (!effectiveUserId || !targetDeviceId) {
         sendJson(res, 400, {
           success: false,
           error: { code: 'INVALID_REQUEST', message: 'userId and deviceId are required.' },
@@ -947,18 +1207,37 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
         return;
       }
 
+      // Verify target device exists
+      const devRows = await queryDb<{ id: string }>('SELECT id FROM devices WHERE id = $1', [targetDeviceId]);
+      if (devRows.length === 0) {
+        sendJson(res, 404, {
+          success: false,
+          error: { code: 'DEVICE_NOT_FOUND', message: `Device '${targetDeviceId}' does not exist.` },
+        });
+        return;
+      }
+
+      // Verify user exists or initialize stub profile
+      const syntheticEmail = `${effectiveUserId}@user.nova.local`;
+      await queryDb(
+        `INSERT INTO users (id, email, name, updated_at)
+         VALUES ($1, $2, 'NOVA User', NOW())
+         ON CONFLICT (id) DO NOTHING;`,
+        [effectiveUserId, syntheticEmail]
+      );
+
       await queryDb(
         `INSERT INTO user_devices (user_id, device_id, label, is_primary)
          VALUES ($1, $2, $3, TRUE)
          ON CONFLICT (user_id, device_id) DO UPDATE SET
            label = EXCLUDED.label,
            is_primary = TRUE;`,
-        [userId, targetDeviceId, label]
+        [effectiveUserId, targetDeviceId, label]
       );
 
       sendJson(res, 200, {
         success: true,
-        data: { linked: true, userId, deviceId: targetDeviceId },
+        data: { linked: true, userId: effectiveUserId, deviceId: targetDeviceId },
       });
       return;
     }
@@ -1395,13 +1674,28 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 5. POST /api/v1/devices/:deviceId/heartbeat
+    // 5. POST /api/v1/devices/:deviceId/heartbeat or /api/v1/devices/heartbeat
     // Firmware telemetry endpoint. Authenticated via deviceKey.
     // Accepts non-secret telemetry only. Rejects Wi-Fi passwords.
+    // Idempotent: repeated reports maintain consistent device online telemetry.
     // =========================================================================
     const heartbeatMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/heartbeat$/);
-    if (heartbeatMatch && method === 'POST') {
-      const targetDeviceId = decodeURIComponent(heartbeatMatch[1]);
+    const isDirectHeartbeat = pathname === '/api/v1/devices/heartbeat';
+    if ((heartbeatMatch || isDirectHeartbeat) && method === 'POST') {
+      const targetDeviceId = heartbeatMatch
+        ? decodeURIComponent(heartbeatMatch[1])
+        : ((req.body?.deviceId as string) || getHeader(req, 'x-nova-device-id') || '');
+
+      if (!targetDeviceId || typeof targetDeviceId !== 'string' || !targetDeviceId.trim()) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_DEVICE_ID',
+            message: 'A valid target deviceId must be provided in the URL, x-nova-device-id header, or request body.',
+          },
+        });
+        return;
+      }
 
       const auth = await authenticateDeviceRequest(req, targetDeviceId);
       if (!auth.authorized) {
@@ -1420,6 +1714,50 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           error: {
             code: 'INVALID_TELEMETRY',
             message: 'Heartbeat must only contain non-secret telemetry. Do not send Wi-Fi credentials to cloud APIs.',
+          },
+        });
+        return;
+      }
+
+      // Truth-in-Hardware: validate power telemetry if provided
+      const rawPowerSource = telemetry.power_source ?? telemetry.powerSource ?? telemetry.powerStatus;
+      if (rawPowerSource !== undefined && rawPowerSource !== null) {
+        if (typeof rawPowerSource !== 'string') {
+          sendJson(res, 400, {
+            success: false,
+            error: {
+              code: 'INVALID_POWER_TELEMETRY',
+              message: 'Power telemetry must be a valid string.',
+            },
+          });
+          return;
+        }
+        const normalizedPower = rawPowerSource.trim().toLowerCase();
+        const validSources = ['usb_5v', 'usb-c_5v', 'usb_c_5v', 'power_line_usb_5v', 'usb-c 5v bus'];
+        if (!validSources.includes(normalizedPower)) {
+          sendJson(res, 400, {
+            success: false,
+            error: {
+              code: 'INVALID_POWER_TELEMETRY',
+              message: 'Invalid power source. NOVA is strictly USB-C 5V bus powered (expected "usb_5v" or "usb-c_5v"). Fake battery telemetry is rejected.',
+            },
+          });
+          return;
+        }
+      }
+
+      // Reject fake battery percentage or non-null battery voltage
+      if (
+        ('batteryPercent' in telemetry && telemetry.batteryPercent !== null) ||
+        ('battery_percent' in telemetry && telemetry.battery_percent !== null) ||
+        ('batteryMv' in telemetry && telemetry.batteryMv !== null) ||
+        ('battery_mv' in telemetry && telemetry.battery_mv !== null)
+      ) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_POWER_TELEMETRY',
+            message: 'Truth-in-hardware: NOVA hardware does not include a LiPo battery fuel gauge IC. Battery percentage telemetry is prohibited.',
           },
         });
         return;
@@ -1477,6 +1815,7 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
           deviceId: targetDeviceId,
           serverTime: new Date().toISOString(),
           status: 'online',
+          powerSource: 'usb_5v',
           oledState,
           queueCount,
           wifiVaultVersion: updatedRows[0].wifi_vault_version || 1,
@@ -1520,57 +1859,46 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
       let resolvedModel: string;
       let usedToken: string | null = null;
 
-      if (tokens.length > 0) {
-        const claim = tokens[0];
-        if (claim.is_redeemed) {
-          sendJson(res, 400, {
-            success: false,
-            error: {
-              code: 'CLAIM_TOKEN_ALREADY_REDEEMED',
-              message: 'This claim token has already been claimed.',
-            },
-          });
-          return;
-        }
-
-        if (new Date(claim.expires_at) < new Date()) {
-          sendJson(res, 410, {
-            success: false,
-            error: {
-              code: 'CLAIM_TOKEN_EXPIRED',
-              message: 'Claim token has expired (15-minute lifespan). Refresh the QR code on your NOVA OLED.',
-            },
-          });
-          return;
-        }
-
-        // Mark redeemed in database
-        await queryDb('UPDATE claim_tokens SET is_redeemed = TRUE, redeemed_at = NOW() WHERE token = $1', [claim.token]);
-        resolvedDeviceId = claim.device_id;
-        resolvedSerial = claim.serial_number;
-        resolvedModel = claim.hardware_model;
-        usedToken = claim.token;
-      } else {
-        const possibleDevId = cleanInput.startsWith('nova-c3-') ? cleanInput : `nova-c3-${cleanInput}`;
-        const devRows = await queryDb<DeviceRecord>(
-          'SELECT id, serial_number, hardware_model FROM devices WHERE id = $1 OR id = $2',
-          [cleanInput, possibleDevId]
-        );
-        if (devRows.length > 0) {
-          resolvedDeviceId = devRows[0].id;
-          resolvedSerial = devRows[0].serial_number;
-          resolvedModel = devRows[0].hardware_model;
-        } else {
-          sendJson(res, 400, {
-            success: false,
-            error: {
-              code: 'INVALID_CLAIM_CODE',
-              message: 'No claim record or registered hardware matches this token or device ID.',
-            },
-          });
-          return;
-        }
+      if (tokens.length === 0) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_CLAIM_CODE',
+            message: 'No claim record matches this claim code.',
+          },
+        });
+        return;
       }
+
+      const claim = tokens[0];
+      if (claim.is_redeemed) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'CLAIM_TOKEN_ALREADY_REDEEMED',
+            message: 'This claim token has already been claimed.',
+          },
+        });
+        return;
+      }
+
+      if (new Date(claim.expires_at) < new Date()) {
+        sendJson(res, 410, {
+          success: false,
+          error: {
+            code: 'CLAIM_TOKEN_EXPIRED',
+            message: 'Claim token has expired (15-minute lifespan). Refresh the QR code on your NOVA OLED.',
+          },
+        });
+        return;
+      }
+
+      // Mark redeemed in database
+      await queryDb('UPDATE claim_tokens SET is_redeemed = TRUE, redeemed_at = NOW() WHERE token = $1', [claim.token]);
+      resolvedDeviceId = claim.device_id;
+      resolvedSerial = claim.serial_number;
+      resolvedModel = claim.hardware_model;
+      usedToken = claim.token;
 
       // Create durable pairing session (valid 30 days)
       const sessionId = `sess_${crypto.randomBytes(16).toString('hex')}`;
@@ -2755,12 +3083,29 @@ export default async function handler(req: ExtendedRequest, res: ServerResponse)
     }
 
     // =========================================================================
-    // 13. POST /api/v1/devices/:deviceId/sync/test
-    // Idempotent sync test to Notion database
+    // 13. POST /api/v1/devices/:deviceId/sync/test & /api/v1/devices/actions/sync
+    // Idempotent sync test & action dispatch to Notion database
     // =========================================================================
     const syncTestMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/sync\/test$/);
-    if (syncTestMatch && method === 'POST') {
-      const targetDeviceId = decodeURIComponent(syncTestMatch[1]);
+    const actionSyncMatch = pathname.match(/^\/api\/v1\/devices\/([^/]+)\/actions\/sync$/);
+    const isDirectActionSync = pathname === '/api/v1/devices/actions/sync';
+    if ((syncTestMatch || actionSyncMatch || isDirectActionSync) && method === 'POST') {
+      const targetDeviceId = syncTestMatch
+        ? decodeURIComponent(syncTestMatch[1])
+        : actionSyncMatch
+          ? decodeURIComponent(actionSyncMatch[1])
+          : ((req.body?.deviceId as string) || getHeader(req, 'x-nova-device-id') || '');
+
+      if (!targetDeviceId || typeof targetDeviceId !== 'string' || !targetDeviceId.trim()) {
+        sendJson(res, 400, {
+          success: false,
+          error: {
+            code: 'INVALID_DEVICE_ID',
+            message: 'A valid target deviceId must be provided in the URL, x-nova-device-id header, or request body.',
+          },
+        });
+        return;
+      }
 
       const auth = await authenticateDeviceRequest(req, targetDeviceId);
       if (!auth.authorized) {

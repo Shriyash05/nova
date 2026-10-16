@@ -1,253 +1,204 @@
 import React from 'react';
-import { Database, KeyRound, Wifi, RefreshCw } from 'lucide-react';
+import {
+  LightningBoltSticker,
+  PaperAirplaneSticker,
+  EyeGlyphSticker,
+} from '../illustrations/RetroStickers';
 
 export const HowItWorksSection: React.FC = () => {
   return (
     <section
       id="how-it-works"
       style={{
-        paddingTop: '5rem',
+        backgroundColor: 'var(--bg-body-yellow)',
+        paddingTop: '2rem',
         paddingBottom: '5rem',
-        borderBottom: '1px solid var(--border-subtle)',
+        position: 'relative',
       }}
     >
       <div className="marketing-container">
-        {/* Section Heading */}
-        <div style={{ maxWidth: '640px', marginBottom: '3.5rem' }}>
-          <span
-            style={{
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--accent-cyan)',
-              display: 'block',
-              marginBottom: '0.5rem',
-            }}
-          >
-            System Architecture
-          </span>
+        {/* Centered Heading exactly as in the reference image */}
+        <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
           <h2
-            className="font-display"
             style={{
-              fontSize: 'clamp(2rem, 3.5vw, 3rem)',
-              lineHeight: 1.1,
-              letterSpacing: '-0.025em',
-              color: 'var(--text-primary)',
-              marginBottom: '1rem',
+              fontFamily: 'var(--font-heading)',
+              fontSize: 'clamp(2.5rem, 5vw, 3.75rem)',
+              fontWeight: 900,
+              color: '#000000',
+              letterSpacing: '-0.04em',
             }}
           >
-            A security model engineered for physical hardware.
+            How it works
           </h2>
-          <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            Most consumer IoT devices take dangerous shortcuts with cloud-relayed passwords and hardcoded tokens. NOVA implements a defense-in-depth model across the device, network, and database.
-          </p>
         </div>
 
-        {/* Visual Architecture Flow Columns */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gap: '1.5rem',
-          }}
-          className="architecture-flow"
-        >
-          {/* Layer 1: Out-of-Band Network Provisioning */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '1.75rem',
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr',
-              gap: '1.5rem',
-              alignItems: 'flex-start',
-            }}
-          >
+        {/* The 3 Neo-Brutalist Cards Grid (Directly matching the 3 cards in the reference image!) */}
+        <div className="grid-cards-3" style={{ marginBottom: '4.5rem' }}>
+          {/* Card 1: 1. Wake (Lightning Bolt) */}
+          <div className="card-brutal card-brutal-interactive">
+            {/* Inset Pink Icon Box with Center Line */}
             <div
+              className="card-inset-pink"
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(0, 242, 254, 0.1)',
-                color: 'var(--accent-cyan)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
+                height: '140px',
+                marginBottom: '1.75rem',
               }}
             >
-              <Wifi size={22} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Layer 01 &bull; Local Provisioning
-                </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--status-success)', backgroundColor: 'var(--status-success-dim)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-xs)' }}>
-                  Out-of-Band
-                </span>
-              </div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>
-                Zero Cloud-Relayed Wi-Fi Passwords
-              </h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                Wi-Fi credentials are never entered on a public cloud web page. The ESP32-C3 hosts an isolated local SoftAP access point at <code>192.168.4.1</code>. Your browser connects directly to the hardware over an encrypted local radio link, configuring SSIDs without intermediate cloud relays.
-              </p>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <strong>Verification:</strong> Cloud API explicitly blocks cloud Wi-Fi provisioning endpoints with HTTP 403 to prevent accidental network exposure.
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <LightningBoltSticker size={64} />
               </div>
             </div>
+
+            <h3
+              style={{
+                fontFamily: 'var(--font-heading)',
+                fontSize: '1.75rem',
+                fontWeight: 900,
+                color: '#000000',
+                letterSpacing: '-0.03em',
+                marginBottom: '0.85rem',
+              }}
+            >
+              Wake
+            </h3>
+
+            <p
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.98rem',
+                fontWeight: 500,
+                color: '#262626',
+                lineHeight: 1.6,
+              }}
+            >
+              Kickstart your companion by saying “Hi ESP”. NOVA’s local WakeNet engine spots the acoustic trigger on the ESP32-C3 RISC-V core with zero cloud lag.
+            </p>
           </div>
 
-          {/* Layer 2: Hashed Device Secrets */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '1.75rem',
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr',
-              gap: '1.5rem',
-              alignItems: 'flex-start',
-            }}
-          >
+          {/* Card 2: 2. Speak (Paper Airplane) */}
+          <div className="card-brutal card-brutal-interactive">
+            {/* Inset Pink Icon Box with Center Line */}
             <div
+              className="card-inset-pink"
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                color: 'var(--accent-blue)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
+                height: '140px',
+                marginBottom: '1.75rem',
               }}
             >
-              <KeyRound size={22} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Layer 02 &bull; Cryptographic Identity
-                </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', backgroundColor: 'var(--accent-cyan-dim)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-xs)' }}>
-                  SHA-256 at Rest
-                </span>
-              </div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>
-                One-Way Hashed Bearer Tokens
-              </h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                NOVA never stores raw device keys in PostgreSQL. The backend computes a cryptographic SHA-256 hash at rest. Even in the event of a full database leak, an adversary cannot reconstruct the bearer token needed to impersonate your device.
-              </p>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <strong>Key Rotation:</strong> Keys can be rotated on demand via authenticated <code>POST /api/v1/devices/:id/device-key/rotate</code>; old keys are revoked atomically.
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <PaperAirplaneSticker size={76} />
               </div>
             </div>
+
+            <h3
+              style={{
+                fontFamily: 'var(--font-heading)',
+                fontSize: '1.75rem',
+                fontWeight: 900,
+                color: '#000000',
+                letterSpacing: '-0.03em',
+                marginBottom: '0.85rem',
+              }}
+            >
+              Speak
+            </h3>
+
+            <p
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.98rem',
+                fontWeight: 500,
+                color: '#262626',
+                lineHeight: 1.6,
+              }}
+            >
+              Alright, you're in! Speak your thoughts, ideas, or to-dos. The analog MAX4466 microphone captures crisp audio while the OLED equalizer bars dance in real-time.
+            </p>
           </div>
 
-          {/* Layer 3: Ephemeral 15-Minute Claim Tokens */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '1.75rem',
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr',
-              gap: '1.5rem',
-              alignItems: 'flex-start',
-            }}
-          >
+          {/* Card 3: 3. Express & Sync (All-Seeing Eye) */}
+          <div className="card-brutal card-brutal-interactive">
+            {/* Inset Pink Icon Box with Center Line */}
             <div
+              className="card-inset-pink"
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                color: 'var(--status-success)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
+                height: '140px',
+                marginBottom: '1.75rem',
               }}
             >
-              <RefreshCw size={22} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Layer 03 &bull; Web Pairing
-                </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--status-success)', backgroundColor: 'var(--status-success-dim)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-xs)' }}>
-                  Single-Use 15m
-                </span>
-              </div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>
-                Ephemeral QR Claim Protocol
-              </h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                To link NOVA to your browser, the device generates a short-lived token displayed on the 128&times;64 OLED. The token expires in 900 seconds, is single-use, and is invalidated immediately upon redemption. No permanent shared secrets are stored in browser localStorage.
-              </p>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <strong>Replay Defense:</strong> Redeeming an already-used claim token returns HTTP 409 conflict and triggers security rate-limiting.
+              <div style={{ position: 'relative', zIndex: 2 }}>
+                <EyeGlyphSticker size={78} />
               </div>
             </div>
-          </div>
 
-          {/* Layer 4: Fail-Closed Distributed Rate Limiter */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '1.75rem',
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr',
-              gap: '1.5rem',
-              alignItems: 'flex-start',
-            }}
-          >
-            <div
+            <h3
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                color: 'var(--status-warning)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
+                fontFamily: 'var(--font-heading)',
+                fontSize: '1.75rem',
+                fontWeight: 900,
+                color: '#000000',
+                letterSpacing: '-0.03em',
+                marginBottom: '0.85rem',
               }}
             >
-              <Database size={22} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  Layer 04 &bull; Distributed Protection
-                </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--status-warning)', backgroundColor: 'var(--status-warning-dim)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-xs)' }}>
-                  Fail-Closed 503
-                </span>
-              </div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>
-                Serverless Cold-Start Resilient Limiting
-              </h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                In-memory rate limiters reset on serverless cold starts. NOVA backs its rate limiter with PostgreSQL atomic upserts, tracking request ledgers across all Vercel instances. Crucially, during database outages, sensitive endpoints fail closed with HTTP 503 rather than silently weakening brute-force defense.
-              </p>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                <strong>Health Availability:</strong> Non-sensitive <code>/api/health</code> checks remain accessible and report truthful connectivity status.
-              </div>
-            </div>
+              Express &amp; Sync
+            </h3>
+
+            <p
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: '0.98rem',
+                fontWeight: 500,
+                color: '#262626',
+                lineHeight: 1.6,
+              }}
+            >
+              Hold tight! In just seconds, NOVA’s OLED eyes react with joyful sparkles, and your voice memo syncs directly to your Notion database with zero monthly fee.
+            </p>
           </div>
+        </div>
+
+        {/* The Marquee Ticker: "We've got you... Notion Sync, ESP32-C3, Local WakeNet" */}
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <h3
+            style={{
+              fontFamily: 'var(--font-heading)',
+              fontSize: 'clamp(1.5rem, 3.5vw, 2.35rem)',
+              fontWeight: 900,
+              color: '#000000',
+              letterSpacing: '-0.03em',
+            }}
+          >
+            We've got you... Notion Sync, Offline Privacy &amp; Pure Hardware
+          </h3>
+        </div>
+      </div>
+
+      {/* Infinite Scrolling Ticker Banner across the full width */}
+      <div className="ticker-wrap">
+        <div className="ticker-move">
+          {[0, 1].map((copyIndex) => (
+            <div key={copyIndex} style={{ display: 'flex', alignItems: 'center' }}>
+              <span className="ticker-item">
+                <span style={{ color: 'var(--bg-hero-pink)' }}>★</span> ZERO SUBSCRIPTION
+              </span>
+              <span className="ticker-item">
+                <span style={{ color: 'var(--btn-amber)' }}>⚡</span> ESP32-C3 160MHZ RISC-V
+              </span>
+              <span className="ticker-item">
+                <span style={{ color: '#55EFC4' }}>🔒</span> LOCAL WAKENET WAKE-WORD
+              </span>
+              <span className="ticker-item">
+                <span style={{ color: '#74B9FF' }}>📝</span> DIRECT NOTION DATABASE SYNC
+              </span>
+              <span className="ticker-item">
+                <span style={{ color: 'var(--bg-hero-pink)' }}>👀</span> 128×64 ANIMATED OLED
+              </span>
+              <span className="ticker-item">
+                <span style={{ color: 'var(--btn-amber)' }}>🎤</span> MAX4466 16 KHZ SAMPLING
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </section>
