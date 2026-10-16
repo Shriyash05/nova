@@ -3,11 +3,18 @@ import { WaveDivider } from '../illustrations/WaveDivider';
 import { Sparkles, Terminal, ArrowRight } from 'lucide-react';
 
 export interface FooterProps {
+  onOpenWaitlist?: () => void;
   onOpenPreorderModal?: () => void;
   onEnterDevLab?: () => void;
+  onNavigate?: (page: 'home' | 'dashboard' | 'connect' | 'story') => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onOpenPreorderModal: _onOpenPreorderModal, onEnterDevLab }) => {
+export const Footer: React.FC<FooterProps> = ({
+  onOpenWaitlist,
+  onOpenPreorderModal: _onOpenPreorderModal,
+  onEnterDevLab,
+  onNavigate,
+}) => {
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
 
@@ -200,20 +207,33 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPreorderModal: _onOpenPreo
               Explore
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <button onClick={() => scrollTo('features')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
-                Benefits
-              </button>
-              <button onClick={() => scrollTo('how-it-works')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+              {onNavigate && (
+                <>
+                  <button onClick={() => onNavigate('home')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    Home
+                  </button>
+                  <button onClick={() => onNavigate('story')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    The NOVA Story
+                  </button>
+                  <button onClick={() => onNavigate('dashboard')} style={{ color: 'var(--accent-cyan)', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 700 }}>
+                    Companion Hub
+                  </button>
+                  <button onClick={() => onNavigate('connect')} style={{ color: 'var(--bg-hero-pink)', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 700 }}>
+                    Connect Device
+                  </button>
+                </>
+              )}
+              <button onClick={() => { if (onNavigate) onNavigate('home'); setTimeout(() => scrollTo('how-it-works'), 50); }} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
                 How It Works
               </button>
-              <button onClick={() => scrollTo('expressions')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+              <button onClick={() => { if (onNavigate) onNavigate('home'); setTimeout(() => scrollTo('expressions'), 50); }} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
                 OLED Expressions
               </button>
-              <button onClick={() => scrollTo('specs')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+              <button onClick={() => { if (onNavigate) onNavigate('home'); setTimeout(() => scrollTo('specs'), 50); }} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
                 Hardware Blueprint
               </button>
-              <button onClick={() => scrollTo('pricing')} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
-                Pre-order Pricing
+              <button onClick={() => { if (onOpenWaitlist) onOpenWaitlist(); else if (onNavigate) { onNavigate('home'); setTimeout(() => scrollTo('pricing'), 50); } }} style={{ color: '#888', textAlign: 'left', fontSize: '0.9rem', cursor: 'pointer' }}>
+                Early Access Editions
               </button>
             </div>
           </div>

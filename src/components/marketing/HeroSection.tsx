@@ -169,7 +169,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                   padding: '1rem 2.25rem',
                 }}
               >
-                <span>Pre-order NOVA — $49</span>
+                <span>Join Priority Waitlist</span>
                 <ArrowRight size={18} />
               </button>
 

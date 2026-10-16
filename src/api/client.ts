@@ -244,6 +244,29 @@ export class NovaApiClient {
     );
   }
 
+  public async unlinkUserDevice(
+    deviceId: string
+  ): Promise<ApiResponse<{ unlinked: boolean; deviceId: string }>> {
+    return this.request<{ unlinked: boolean; deviceId: string }>(
+      '/api/v1/user/devices/unlink',
+      {
+        method: 'POST',
+        body: JSON.stringify({ deviceId }),
+      }
+    );
+  }
+
+  public async launchSignup(payload: {
+    email: string;
+    consent: boolean;
+    source?: string;
+  }): Promise<ApiResponse<{ message?: string; email?: string; subscriberCount?: number }>> {
+    return this.request<{ message?: string; email?: string; subscriberCount?: number }>('/api/v1/launch-signup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   public async getDeviceStatus(
     deviceId: string,
     authToken?: string

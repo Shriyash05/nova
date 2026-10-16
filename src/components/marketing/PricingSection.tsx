@@ -36,7 +36,7 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ onSelectTier }) 
             }}
           >
             <Sparkles size={14} style={{ color: '#FF9F1C' }} />
-            <span>Honest Flat Hardware Pricing</span>
+            <span>Early Access Hardware Editions</span>
           </div>
 
           <h2
@@ -58,11 +58,12 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ onSelectTier }) 
               fontSize: '1.1rem',
               fontWeight: 500,
               color: '#262626',
-              maxWidth: '540px',
+              maxWidth: '560px',
               margin: '0 auto',
+              lineHeight: 1.5,
             }}
           >
-            Choose your edition. All pre-orders include Batch #1 reservation, early-access firmware, and direct Notion template integration.
+            NOVA is currently in pre-production. Join the priority waitlist today for batch #1 allocation with zero upfront payment.
           </p>
         </div>
 
@@ -120,7 +121,7 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ onSelectTier }) 
               className="btn-brutal btn-brutal-white"
               style={{ width: '100%' }}
             >
-              <span>Pre-order Maker Kit</span>
+              <span>Join Waitlist (Maker Kit)</span>
             </button>
           </div>
 
@@ -206,7 +207,7 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ onSelectTier }) 
               className="btn-brutal btn-brutal-amber"
               style={{ width: '100%', fontSize: '1.05rem', padding: '1rem' }}
             >
-              <span>Pre-order Keychain Edition</span>
+              <span>Join Waitlist (Keychain Edition)</span>
               <ArrowRight size={17} />
             </button>
           </div>
@@ -256,7 +257,7 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ onSelectTier }) 
               className="btn-brutal btn-brutal-white"
               style={{ width: '100%' }}
             >
-              <span>Pre-order Twin Pack</span>
+              <span>Join Waitlist (Twin Pack)</span>
             </button>
           </div>
         </div>
