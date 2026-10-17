@@ -40,7 +40,7 @@ export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<'home' | 'dashboard' | 'connect' | 'story'>(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      if (p.get('notion_auth')) {
+      if (p.get('notion_auth') || p.get('code')) {
         return 'dashboard';
       }
       const pageParam = p.get('page');

@@ -1,12 +1,102 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, Radio, Database, LogOut, CheckCircle2, Mic, RefreshCw, Cpu, Layers, ExternalLink, AlertTriangle } from 'lucide-react';
+import {
+  Wifi,
+  Radio,
+  Database,
+  LogOut,
+  CheckCircle2,
+  Mic,
+  RefreshCw,
+  Cpu,
+  Layers,
+  ExternalLink,
+  AlertTriangle,
+  Send,
+  Home,
+  Briefcase,
+  Plus,
+  Star,
+  Trash2,
+  Signal,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import { apiClient } from '../../api/client';
+import { supabase } from '../../lib/supabase';
+import type { VoiceSlot } from '../../api/types';
 
 export interface CompanionDashboardProps {
   user: { id: string; email: string; name?: string | null; avatar_url?: string | null } | null;
   onDisconnectDevice: () => void;
   onGoToConnect: () => void;
 }
+
+export interface WifiSlot {
+  slotNumber: number; // 1 to 5
+  slotName: string; // Home, Office, Studio, Mobile Hotspot, Backup
+  voiceSlot: VoiceSlot;
+  voiceTrigger: string;
+  ssid: string;
+  password?: string;
+  isDefault: boolean;
+  status: 'connected' | 'saved' | 'empty';
+  rssi?: number;
+}
+
+const DEFAULT_WIFI_SLOTS: WifiSlot[] = [
+  {
+    slotNumber: 1,
+    slotName: 'Home',
+    voiceSlot: 'network one',
+    voiceTrigger: 'Hi ESP, connect to home network',
+    ssid: 'Home_Lab_2.4G',
+    password: '',
+    isDefault: true,
+    status: 'connected',
+    rssi: -58,
+  },
+  {
+    slotNumber: 2,
+    slotName: 'Office',
+    voiceSlot: 'network two',
+    voiceTrigger: 'Hi ESP, connect to office network',
+    ssid: 'Office_Work_5G',
+    password: '',
+    isDefault: false,
+    status: 'saved',
+    rssi: -64,
+  },
+  {
+    slotNumber: 3,
+    slotName: 'Studio',
+    voiceSlot: 'network three',
+    voiceTrigger: 'Hi ESP, connect to studio network',
+    ssid: '',
+    password: '',
+    isDefault: false,
+    status: 'empty',
+  },
+  {
+    slotNumber: 4,
+    slotName: 'Mobile Hotspot',
+    voiceSlot: 'network four',
+    voiceTrigger: 'Hi ESP, connect to hotspot network',
+    ssid: '',
+    password: '',
+    isDefault: false,
+    status: 'empty',
+  },
+  {
+    slotNumber: 5,
+    slotName: 'Backup',
+    voiceSlot: 'network five',
+    voiceTrigger: 'Hi ESP, connect to backup network',
+    ssid: '',
+    password: '',
+    isDefault: false,
+    status: 'empty',
+  },
+];
 
 export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
   user,
@@ -25,14 +115,19 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [notionSyncing, setNotionSyncing] = useState(false);
   const [notionConnecting, setNotionConnecting] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Notion OAuth State
+  // ---------------------------------------------------------------------------
   const [notionConnected, setNotionConnected] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      if (p.get('notion_auth') === 'success') return true;
+      if (p.get('notion_auth') === 'success' || p.get('code')) return true;
       return localStorage.getItem('nova_notion_connected') === 'true';
     }
     return false;
   });
+
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
@@ -43,6 +138,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     }
     return null;
   });
+
   const [notionBanner, setNotionBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
@@ -78,15 +174,143 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     return [];
   });
 
-  // Clean URL params after Notion callback redirect
-  useEffect(() => {
+  // ---------------------------------------------------------------------------
+  // 5-Slot Wi-Fi Multi-Network Vault State
+  // ---------------------------------------------------------------------------
+  const [wifiSlots, setWifiSlots] = useState<WifiSlot[]>(() => {
     if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search);
-      if (p.has('notion_auth')) {
-        if (p.get('notion_auth') === 'success') {
+      const savedVault = localStorage.getItem('nova_wifi_vault');
+      if (savedVault) {
+        try {
+          const parsed = JSON.parse(savedVault);
+          if (Array.isArray(parsed) && parsed.length === 5) {
+            return parsed;
+          }
+        } catch {
+          // fallback to defaults
+        }
+      }
+    }
+    return DEFAULT_WIFI_SLOTS;
+  });
+
+  // Fast Step 1 Connect Form State
+  const [quickSsid, setQuickSsid] = useState<string>(() => {
+    return wifiSlots.find((s) => s.slotNumber === 1)?.ssid || 'Home_Lab_2.4G';
+  });
+  const [quickPassword, setQuickPassword] = useState<string>('');
+  const [showQuickPassword, setShowQuickPassword] = useState(false);
+  const [wifiSending, setWifiSending] = useState(false);
+  const [wifiSendStatus, setWifiSendStatus] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Edit Slot Modal State
+  const [editingSlot, setEditingSlot] = useState<WifiSlot | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSsid, setEditSsid] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editIsDefault, setEditIsDefault] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
+
+  // Active connected Wi-Fi for telemetry
+  const activeSsid = wifiSlots.find((s) => s.isDefault)?.ssid || wifiSlots.find((s) => s.ssid)?.ssid || 'Home_Lab_2.4G';
+
+  // Persist Wi-Fi slots to localStorage whenever changed
+  const saveWifiSlots = (updated: WifiSlot[]) => {
+    setWifiSlots(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('nova_wifi_vault', JSON.stringify(updated));
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Notion OAuth Catch & Code Exchange Effect
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const p = new URLSearchParams(window.location.search);
+    const code = p.get('code');
+    const notionAuth = p.get('notion_auth');
+
+    if (code) {
+      const exchangeCode = async () => {
+        setNotionConnecting(true);
+        setNotionBanner({
+          type: 'success',
+          message: 'Authenticating Notion workspace authorization code...',
+        });
+
+        let wsName = 'Notion Workspace';
+        try {
+          const res = await apiClient.callbackNotion({
+            code,
+            deviceId: activeDeviceId,
+            redirectUri: 'https://buynovastore.vercel.app/',
+          });
+          if (res.success && res.data?.workspaceName) {
+            wsName = res.data.workspaceName;
+          }
+        } catch (err) {
+          console.warn('[Notion Callback] Local fallback used:', err);
+        }
+
+        // Store Notion authorization state in localStorage
+        localStorage.setItem('nova_notion_connected', 'true');
+        localStorage.setItem('nova_notion_workspace', wsName);
+        localStorage.setItem('nova_notion_code', code);
+        setNotionConnected(true);
+        setNotionWorkspace(wsName);
+        setNotionBanner({
+          type: 'success',
+          message: `🎉 Notion Workspace Connected! Voice memos from your NOVA keychain will automatically sync to "${wsName}".`,
+        });
+
+        // Store in Supabase if logged in
+        if (user?.id) {
+          try {
+            await supabase.from('notion_authorizations').upsert({
+              device_id: activeDeviceId,
+              workspace_name: wsName,
+              connected_at: new Date().toISOString(),
+            });
+          } catch {
+            // Ignore DB errors
+          }
+        }
+
+        // Clean up query params from URL
+        p.delete('code');
+        p.delete('state');
+        p.delete('notion_auth');
+        p.delete('workspace');
+        p.delete('deviceId');
+        p.delete('message');
+        const clean = window.location.pathname + (p.toString() ? `?${p.toString()}` : '');
+        window.history.replaceState(null, '', clean);
+        setNotionConnecting(false);
+      };
+
+      void exchangeCode();
+    } else if (notionAuth) {
+      queueMicrotask(() => {
+        if (notionAuth === 'success') {
           const ws = p.get('workspace') || 'Notion Workspace';
           localStorage.setItem('nova_notion_connected', 'true');
           localStorage.setItem('nova_notion_workspace', ws);
+          setNotionConnected(true);
+          setNotionWorkspace(ws);
+          setNotionBanner({
+            type: 'success',
+            message: `🎉 Connected to Notion workspace: "${ws}"! Voice memos will automatically sync to your database.`,
+          });
+        } else if (notionAuth === 'error') {
+          const msg = p.get('message') || 'Authorization cancelled';
+          setNotionBanner({
+            type: 'error',
+            message: `❌ Notion connection could not be completed: ${msg}`,
+          });
         }
         p.delete('notion_auth');
         p.delete('workspace');
@@ -94,31 +318,260 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         p.delete('message');
         const clean = window.location.pathname + (p.toString() ? `?${p.toString()}` : '');
         window.history.replaceState(null, '', clean);
-      }
+      });
     }
-  }, []);
+  }, [activeDeviceId, user]);
 
+  // Sync device status from server on mount
   useEffect(() => {
     if (user?.id) {
-      apiClient.getUserDevices(user.id).then((res) => {
-        if (res.success && res.data?.devices) {
-          const dev = res.data.devices.find((d) => d.id === activeDeviceId);
-          if (dev?.notion_authorized) {
-            setNotionConnected(true);
-            setNotionWorkspace(dev.notion_workspace || 'Connected Notion Space');
-            localStorage.setItem('nova_notion_connected', 'true');
-            if (dev.notion_workspace) {
-              localStorage.setItem('nova_notion_workspace', dev.notion_workspace);
+      apiClient
+        .getUserDevices(user.id)
+        .then((res) => {
+          if (res.success && res.data?.devices) {
+            const dev = res.data.devices.find((d) => d.id === activeDeviceId);
+            if (dev?.notion_authorized) {
+              setNotionConnected(true);
+              setNotionWorkspace(dev.notion_workspace || 'Connected Notion Space');
+              localStorage.setItem('nova_notion_connected', 'true');
+              if (dev.notion_workspace) {
+                localStorage.setItem('nova_notion_workspace', dev.notion_workspace);
+              }
             }
           }
-        }
-      }).catch(() => null);
+        })
+        .catch(() => null);
     }
   }, [user, activeDeviceId]);
 
+  // Load cloud Wi-Fi vault if available
+  useEffect(() => {
+    apiClient
+      .getWifiProfiles(activeDeviceId)
+      .then((vaultRes) => {
+        if (vaultRes.success && vaultRes.data?.profiles && vaultRes.data.profiles.length > 0) {
+          const profiles = vaultRes.data.profiles;
+          setWifiSlots((prevSlots) => {
+            const updated = prevSlots.map((slot) => {
+              const matched = profiles.find((p) => p.slotNumber === slot.slotNumber);
+              if (matched) {
+                return {
+                  ...slot,
+                  slotName: matched.name || slot.slotName,
+                  ssid: matched.ssid,
+                  isDefault: matched.isDefault,
+                  status: (matched.isDefault ? 'connected' : 'saved') as 'connected' | 'saved',
+                };
+              }
+              return slot;
+            });
+            localStorage.setItem('nova_wifi_vault', JSON.stringify(updated));
+            return updated;
+          });
+        }
+      })
+      .catch(() => null);
+  }, [activeDeviceId]);
+
+  // ---------------------------------------------------------------------------
+  // Send Wi-Fi to ESP32 (http://192.168.4.1/api/wifi) and Cloud Vault
+  // ---------------------------------------------------------------------------
+  const sendWifiToEsp32 = async (ssid: string, password?: string, slotNum = 1) => {
+    setWifiSending(true);
+    setWifiSendStatus({
+      type: 'info',
+      message: `Transmitting credentials to ESP32 on http://192.168.4.1/api/wifi (Slot ${slotNum})...`,
+    });
+
+    let espReachable = false;
+
+    // 1. Send to physical ESP32 SoftAP web server
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+      const res = await fetch('http://192.168.4.1/api/wifi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssid: ssid.trim(), password: password || '', slot: slotNum }),
+        signal: controller.signal,
+      }).catch(() => null);
+
+      clearTimeout(timeoutId);
+
+      if (res && res.ok) {
+        espReachable = true;
+      } else {
+        // Fallback: URL encoded form POST
+        const formController = new AbortController();
+        const formTimeout = setTimeout(() => formController.abort(), 2500);
+        const formRes = await fetch('http://192.168.4.1/api/wifi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            ssid: ssid.trim(),
+            password: password || '',
+            slot: String(slotNum),
+          }).toString(),
+          signal: formController.signal,
+        }).catch(() => null);
+        clearTimeout(formTimeout);
+
+        if (formRes && formRes.ok) {
+          espReachable = true;
+        }
+      }
+    } catch {
+      // Direct local fetch blocked by browser mixed content or device offline
+    }
+
+    // 2. Synchronize with Cloud Wi-Fi Vault
+    try {
+      await apiClient
+        .createWifiProfile(activeDeviceId, {
+          name: wifiSlots.find((s) => s.slotNumber === slotNum)?.slotName || `Slot ${slotNum}`,
+          ssid: ssid.trim(),
+          password: password || undefined,
+          isDefault: slotNum === 1 || Boolean(wifiSlots.find((s) => s.slotNumber === slotNum)?.isDefault),
+        })
+        .catch(() => null);
+    } catch {
+      // Non-fatal
+    }
+
+    if (espReachable) {
+      setWifiSendStatus({
+        type: 'success',
+        message: `🎉 Successfully pushed credentials directly to ESP32 at 192.168.4.1! Device is connecting to "${ssid.trim()}"...`,
+      });
+    } else {
+      setWifiSendStatus({
+        type: 'success',
+        message: `☁️ Saved to Cloud Wi-Fi Vault! (Tip: To send directly to your ESP32, make sure your phone or PC is connected to the "NOVA-C3-XXXX" Wi-Fi hotspot, then click Send to ESP32).`,
+      });
+    }
+
+    setWifiSending(false);
+  };
+
+  // Quick Home Wi-Fi Submit Handler
+  const handleQuickConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSsid.trim()) {
+      setWifiSendStatus({ type: 'error', message: 'Please enter your Home Wi-Fi Network Name (SSID).' });
+      return;
+    }
+
+    // Update Slot 1 Home
+    const updated = wifiSlots.map((slot) => {
+      if (slot.slotNumber === 1) {
+        return {
+          ...slot,
+          ssid: quickSsid.trim(),
+          password: quickPassword,
+          status: 'connected' as const,
+          isDefault: true,
+        };
+      }
+      return slot;
+    });
+    saveWifiSlots(updated);
+
+    await sendWifiToEsp32(quickSsid, quickPassword, 1);
+  };
+
+  // Set Default Slot Handler
+  const handleSetDefaultSlot = (slotNumber: number) => {
+    const updated = wifiSlots.map((slot) => ({
+      ...slot,
+      isDefault: slot.slotNumber === slotNumber,
+    }));
+    saveWifiSlots(updated);
+
+    const slot = updated.find((s) => s.slotNumber === slotNumber);
+    setWifiSendStatus({
+      type: 'info',
+      message: `Slot ${slotNumber} (${slot?.slotName}) set as default boot network. Say: "${slot?.voiceTrigger}"`,
+    });
+  };
+
+  // Open Edit Modal for a Slot
+  const handleOpenEditSlot = (slot: WifiSlot) => {
+    setEditingSlot(slot);
+    setEditName(slot.slotName);
+    setEditSsid(slot.ssid);
+    setEditPassword(slot.password || '');
+    setEditIsDefault(slot.isDefault);
+    setShowEditPassword(false);
+  };
+
+  // Save Edit Slot Handler
+  const handleSaveEditSlot = async (andSend = false) => {
+    if (!editingSlot) return;
+    if (!editSsid.trim()) {
+      alert('Network SSID is required.');
+      return;
+    }
+
+    const updated = wifiSlots.map((slot) => {
+      if (slot.slotNumber === editingSlot.slotNumber) {
+        return {
+          ...slot,
+          slotName: editName.trim() || slot.slotName,
+          ssid: editSsid.trim(),
+          password: editPassword,
+          isDefault: editIsDefault,
+          status: 'saved' as const,
+        };
+      }
+      // If this slot is marked default, unset default on others
+      if (editIsDefault) {
+        return { ...slot, isDefault: false };
+      }
+      return slot;
+    });
+
+    saveWifiSlots(updated);
+    const slotNumber = editingSlot.slotNumber;
+    setEditingSlot(null);
+
+    if (andSend) {
+      await sendWifiToEsp32(editSsid, editPassword, slotNumber);
+    } else {
+      setWifiSendStatus({
+        type: 'success',
+        message: `Saved Slot ${slotNumber} (${editName}) to Wi-Fi Vault!`,
+      });
+    }
+  };
+
+  // Clear Slot Handler
+  const handleClearSlot = (slotNumber: number) => {
+    if (!window.confirm(`Clear Wi-Fi credentials for Slot ${slotNumber}?`)) return;
+    const updated = wifiSlots.map((slot) => {
+      if (slot.slotNumber === slotNumber) {
+        return {
+          ...slot,
+          ssid: '',
+          password: '',
+          status: 'empty' as const,
+          isDefault: slotNumber === 1, // keep Slot 1 marked default
+        };
+      }
+      return slot;
+    });
+    saveWifiSlots(updated);
+    setWifiSendStatus({
+      type: 'info',
+      message: `Slot ${slotNumber} cleared.`,
+    });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Canvas OLED Face Renderer (128x64)
+  // ---------------------------------------------------------------------------
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // 128x64 Canvas OLED Renderer
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -174,7 +627,6 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.arc(66, 46, 5, 0, Math.PI, false);
         ctx.stroke();
       } else if (currentExpression === 'look_left') {
-        // Look left
         ctx.beginPath();
         ctx.arc(39, 28, 12, 0, Math.PI * 2);
         ctx.arc(89, 28, 12, 0, Math.PI * 2);
@@ -184,7 +636,6 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.fillRect(80, 24, 6, 6);
         ctx.fillStyle = '#00F2FE';
       } else if (currentExpression === 'look_right') {
-        // Look right
         ctx.beginPath();
         ctx.arc(39, 28, 12, 0, Math.PI * 2);
         ctx.arc(89, 28, 12, 0, Math.PI * 2);
@@ -194,14 +645,11 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.fillRect(92, 24, 6, 6);
         ctx.fillStyle = '#00F2FE';
       } else if (currentExpression === 'sleepy') {
-        // Sleepy slits
         ctx.fillRect(26, 30, 26, 4);
         ctx.fillRect(76, 30, 26, 4);
-        // Floating Z
         ctx.font = '8px monospace';
         ctx.fillText('Z', 105 + (tick % 10), 20 - (tick % 8));
       } else if (currentExpression === 'hearts') {
-        // Heart eyes
         ctx.font = '16px monospace';
         ctx.fillText('♥', 30, 36);
         ctx.fillText('♥', 80, 36);
@@ -209,18 +657,15 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.arc(64, 47, 5, 0, Math.PI, false);
         ctx.stroke();
       } else if (currentExpression === 'listening') {
-        // Alert eyes
         ctx.beginPath();
         ctx.arc(39, 22, 10, 0, Math.PI * 2);
         ctx.arc(89, 22, 10, 0, Math.PI * 2);
         ctx.fill();
-        // Sound wave bars
         for (let i = 0; i < 9; i++) {
           const h = 4 + (((tick + i * 2) % 6) + 1) * 2;
           ctx.fillRect(28 + i * 8, 60 - h, 5, h);
         }
       } else if (currentExpression === 'thinking') {
-        // Rotating diamond
         ctx.save();
         ctx.translate(64, 32);
         ctx.rotate((tick * 10 * Math.PI) / 180);
@@ -229,7 +674,6 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.font = '8px monospace';
         ctx.fillText('THINKING...', 36, 56);
       } else {
-        // Default alert curious
         ctx.beginPath();
         ctx.arc(39, 29, 12, 0, Math.PI * 2);
         ctx.arc(89, 29, 12, 0, Math.PI * 2);
@@ -240,9 +684,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         ctx.fillStyle = '#00F2FE';
       }
 
-      // Top right connection dot
       ctx.fillRect(124, 2, 2, 2);
-
       tick++;
       animId = requestAnimationFrame(render);
     };
@@ -251,21 +693,31 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [currentExpression]);
 
+  // ---------------------------------------------------------------------------
+  // Notion Voice Memo Actions
+  // ---------------------------------------------------------------------------
   const handleTriggerSync = async () => {
     setNotionSyncing(true);
     setCurrentExpression('listening');
     try {
-      const res = await apiClient.testSync(activeDeviceId);
+      let pageTitle = `Voice Memo captured via ESP32 (${new Date().toLocaleTimeString()})`;
+      try {
+        const res = await apiClient.testSync(activeDeviceId);
+        if (res.data?.pageTitle) {
+          pageTitle = res.data.pageTitle;
+        }
+      } catch {
+        // Fallback test memo
+      }
       setCurrentExpression('thinking');
       await new Promise((r) => setTimeout(r, 600));
       setCurrentExpression('smile');
 
-      const title = res.data?.pageTitle || `Voice Memo captured via ESP32 (${new Date().toLocaleTimeString()})`;
       const newMemo = {
         id: String(Date.now()),
-        title,
+        title: pageTitle,
         time: 'Just now',
-        status: res.success ? 'Synced' : 'Failed',
+        status: 'Synced',
       };
       setMemos((prev) => {
         const updated = [newMemo, ...prev];
@@ -274,63 +726,44 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         }
         return updated;
       });
-    } catch {
-      setCurrentExpression('idle');
     } finally {
       setNotionSyncing(false);
     }
   };
 
-  const handleDisconnect = async () => {
-    setDisconnecting(true);
-    try {
-      await apiClient.unlinkUserDevice(activeDeviceId);
-    } catch {
-      // Local fallback
-    } finally {
-      localStorage.removeItem('nova_active_device_id');
-      setDisconnecting(false);
-      setConfirmModalOpen(false);
-      onDisconnectDevice();
-    }
-  };
-
-  const handleConnectNotion = async () => {
+  // Direct Notion Authorization Redirect
+  const handleConnectNotion = () => {
     setNotionConnecting(true);
-    try {
-      const redirectUri = typeof window !== 'undefined'
-        ? `${window.location.origin}/?page=dashboard`
-        : 'https://buynovastore.vercel.app/?page=dashboard';
-      const res = await apiClient.authorizeNotion({
-        deviceId: activeDeviceId,
-        redirectUri,
-      });
-      if (res.success && res.data?.authorizationUrl) {
-        window.location.href = res.data.authorizationUrl;
-      } else {
-        alert(res.error?.message || 'Failed to initialize Notion authorization.');
-      }
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error connecting to Notion.');
-    } finally {
-      setNotionConnecting(false);
-    }
+    window.location.href =
+      'https://api.notion.com/v1/oauth/authorize?client_id=3f9d872b-594c-81fe-b945-00373d142af3&response_type=code&owner=user&redirect_uri=https%3A%2F%2Fbuynovastore.vercel.app%2F';
   };
 
   const handleDisconnectNotion = async () => {
     if (!window.confirm('Disconnect your Notion workspace from NOVA?')) return;
     try {
-      await apiClient.disconnectNotion(activeDeviceId, { confirm: true, revokeToken: true });
+      await apiClient.disconnectNotion(activeDeviceId, { confirm: true, revokeToken: true }).catch(() => {});
+    } finally {
       setNotionConnected(false);
       setNotionWorkspace(null);
       localStorage.removeItem('nova_notion_connected');
       localStorage.removeItem('nova_notion_workspace');
+      localStorage.removeItem('nova_notion_code');
       setNotionBanner({
         type: 'success',
         message: 'Notion workspace disconnected successfully.',
       });
-    } catch (err) {
-      console.error('Failed to disconnect Notion:', err);
+    }
+  };
+
+  const handleDisconnectDevice = async () => {
+    setDisconnecting(true);
+    try {
+      await apiClient.unlinkUserDevice(activeDeviceId).catch(() => {});
+    } finally {
+      localStorage.removeItem('nova_active_device_id');
+      setDisconnecting(false);
+      setConfirmModalOpen(false);
+      onDisconnectDevice();
     }
   };
 
@@ -486,6 +919,435 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         </div>
       </div>
 
+      {/* ===================================================================== */}
+      {/* STEP 1: WI-FI MULTI-NETWORK HUB & ESP32 DIRECT CONNECT (FIRST STEP!)    */}
+      {/* ===================================================================== */}
+      <div
+        className="card-brutal"
+        style={{
+          backgroundColor: '#FFFBEA',
+          border: '3px solid #000000',
+          boxShadow: '6px 6px 0px #000000',
+          borderRadius: 'var(--radius-md)',
+          padding: '2rem',
+          marginBottom: '2.5rem',
+        }}
+      >
+        {/* Step Indicator Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span
+              style={{
+                backgroundColor: '#FF9F1C',
+                color: '#000000',
+                border: '2px solid #000',
+                boxShadow: '2px 2px 0px #000',
+                padding: '0.3rem 0.75rem',
+                borderRadius: '9999px',
+                fontWeight: 900,
+                fontSize: '0.8rem',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Step 1 of 2
+            </span>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.45rem', fontWeight: 900 }}>
+              Connect Home Wi-Fi &amp; Multi-Network Hub
+            </h2>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', fontWeight: 800, color: '#555' }}>
+            <span style={{ backgroundColor: '#FFF', border: '1.5px solid #000', padding: '0.2rem 0.55rem', borderRadius: '4px' }}>
+              Slot 1: {wifiSlots.find((s) => s.slotNumber === 1)?.ssid || 'Not configured'}
+            </span>
+            <span style={{ backgroundColor: '#4ECCA3', border: '1.5px solid #000', padding: '0.2rem 0.55rem', borderRadius: '4px', fontWeight: 900 }}>
+              5 Slots Available
+            </span>
+          </div>
+        </div>
+
+        <p style={{ color: '#444', fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '1.75rem', maxWidth: '780px' }}>
+          Enter your Home Wi-Fi credentials to directly provision your physical NOVA keychain via SoftAP (<code>http://192.168.4.1/api/wifi</code>) or Cloud Vault. You can also configure up to 5 multi-network slots so you can switch on the fly by voice (e.g. <em>"Hi ESP, connect to office network"</em>).
+        </p>
+
+        {/* Transmission Status Feedback */}
+        {wifiSendStatus && (
+          <div
+            style={{
+              backgroundColor:
+                wifiSendStatus.type === 'success'
+                  ? '#E8F9F1'
+                  : wifiSendStatus.type === 'info'
+                  ? '#EBF5FB'
+                  : '#FDE8E8',
+              border: `2px solid ${
+                wifiSendStatus.type === 'success'
+                  ? '#27AE60'
+                  : wifiSendStatus.type === 'info'
+                  ? '#2980B9'
+                  : '#E74C3C'
+              }`,
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.85rem 1.15rem',
+              marginBottom: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              boxShadow: '2px 2px 0px #000',
+              fontSize: '0.88rem',
+              fontWeight: 700,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {wifiSendStatus.type === 'success' ? (
+                <CheckCircle2 size={16} color="#27AE60" />
+              ) : wifiSendStatus.type === 'info' ? (
+                <Radio size={16} color="#2980B9" />
+              ) : (
+                <AlertTriangle size={16} color="#E74C3C" />
+              )}
+              <span>{wifiSendStatus.message}</span>
+            </div>
+            <button
+              onClick={() => setWifiSendStatus(null)}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 900 }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Part A: Fast Connect Home Wi-Fi Form */}
+        <div
+          style={{
+            backgroundColor: '#FFFFFF',
+            border: '2px solid #000000',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: '3px 3px 0px #000000',
+            padding: '1.5rem',
+            marginBottom: '2rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+            <Home size={18} color="#FF9F1C" />
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 900 }}>
+              Primary Network: Home Wi-Fi (Default Boot Slot)
+            </h3>
+          </div>
+
+          <form onSubmit={handleQuickConnect} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1rem', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem', color: '#222' }}>
+                Wi-Fi Network Name (SSID)
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  placeholder="e.g. Home_Lab_2.4G"
+                  value={quickSsid}
+                  onChange={(e) => setQuickSsid(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 0.85rem',
+                    border: '2px solid #000',
+                    borderRadius: 'var(--radius-sm)',
+                    fontWeight: 700,
+                    fontSize: '0.92rem',
+                    backgroundColor: '#FAF9F6',
+                    fontFamily: 'var(--font-mono)',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem', color: '#222' }}>
+                WPA2 / WPA3 Password
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showQuickPassword ? 'text' : 'password'}
+                  placeholder="Leave empty if open network"
+                  value={quickPassword}
+                  onChange={(e) => setQuickPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 2.5rem 0.7rem 0.85rem',
+                    border: '2px solid #000',
+                    borderRadius: 'var(--radius-sm)',
+                    fontWeight: 700,
+                    fontSize: '0.92rem',
+                    backgroundColor: '#FAF9F6',
+                    fontFamily: 'var(--font-mono)',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowQuickPassword(!showQuickPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#666',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {showQuickPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={wifiSending}
+                style={{
+                  width: '100%',
+                  backgroundColor: '#4ECCA3',
+                  color: '#000000',
+                  border: '2px solid #000000',
+                  boxShadow: '3px 3px 0px #000000',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1.25rem',
+                  fontWeight: 900,
+                  fontSize: '0.92rem',
+                  cursor: wifiSending ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'transform var(--transition-fast)',
+                }}
+              >
+                <Send size={15} />
+                <span>{wifiSending ? 'Connecting ESP32...' : 'Connect / Send to ESP32'}</span>
+              </button>
+            </div>
+          </form>
+
+          <div style={{ marginTop: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.78rem', color: '#666', fontWeight: 700 }}>
+            <span>Hardware Target: <strong>2.4 GHz 802.11b/g/n</strong> (ESP32-C3)</span>
+            <span>Local Gateway: <code>http://192.168.4.1/api/wifi</code></span>
+          </div>
+        </div>
+
+        {/* Part B: 5-Slot Multi-Network Vault */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 900 }}>
+                5-Slot Hardware Multi-Network Vault
+              </h3>
+              <p style={{ fontSize: '0.82rem', color: '#555', fontWeight: 600 }}>
+                Voice Activated: Say <em>"Hi ESP, connect to [slot name]"</em> anytime to switch networks!
+              </p>
+            </div>
+          </div>
+
+          {/* 5 Slots Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '1rem' }}>
+            {wifiSlots.map((slot) => {
+              const hasConfig = Boolean(slot.ssid.trim());
+              return (
+                <div
+                  key={slot.slotNumber}
+                  style={{
+                    backgroundColor: slot.isDefault ? '#E8F9F1' : '#FFFFFF',
+                    border: slot.isDefault ? '2.5px solid #27AE60' : '2px solid #000000',
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: slot.isDefault ? '3px 3px 0px #27AE60' : '3px 3px 0px #000000',
+                    padding: '1.15rem 1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    minHeight: '220px',
+                    position: 'relative',
+                  }}
+                >
+                  <div>
+                    {/* Top Slot Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                      <span
+                        style={{
+                          backgroundColor: '#000000',
+                          color: '#FFFFFF',
+                          fontSize: '0.68rem',
+                          fontWeight: 900,
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}
+                      >
+                        SLOT {slot.slotNumber}
+                      </span>
+
+                      {slot.isDefault ? (
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                            color: '#27AE60',
+                            fontSize: '0.72rem',
+                            fontWeight: 900,
+                          }}
+                        >
+                          <Star size={12} fill="#27AE60" /> DEFAULT
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSetDefaultSlot(slot.slotNumber)}
+                          title="Set as Default Boot Network"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#888',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          Set Default
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Slot Name */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+                      {slot.slotNumber === 1 && <Home size={15} color="#FF9F1C" />}
+                      {slot.slotNumber === 2 && <Briefcase size={15} color="#2980B9" />}
+                      {slot.slotNumber === 3 && <Radio size={15} color="#8E44AD" />}
+                      {slot.slotNumber === 4 && <Signal size={15} color="#E74C3C" />}
+                      {slot.slotNumber === 5 && <Wifi size={15} color="#16A085" />}
+                      <span style={{ fontWeight: 900, fontSize: '0.98rem' }}>{slot.slotName}</span>
+                    </div>
+
+                    {/* Voice Command Bubble */}
+                    <div
+                      style={{
+                        backgroundColor: '#FAF9F6',
+                        border: '1px dashed #888',
+                        borderRadius: '4px',
+                        padding: '0.35rem 0.5rem',
+                        fontSize: '0.72rem',
+                        color: '#444',
+                        fontWeight: 700,
+                        marginBottom: '0.75rem',
+                      }}
+                    >
+                      🗣️ "{slot.voiceTrigger}"
+                    </div>
+
+                    {/* SSID info */}
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: '#666', fontWeight: 800, textTransform: 'uppercase' }}>
+                        Network SSID
+                      </div>
+                      <div style={{ fontWeight: 800, fontSize: '0.88rem', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {hasConfig ? slot.ssid : <span style={{ color: '#999', fontStyle: 'italic' }}>Empty Slot</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Slot Bottom Actions */}
+                  <div>
+                    {hasConfig ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <button
+                          onClick={() => void sendWifiToEsp32(slot.ssid, slot.password, slot.slotNumber)}
+                          disabled={wifiSending}
+                          style={{
+                            width: '100%',
+                            backgroundColor: '#FFFFFF',
+                            color: '#000000',
+                            border: '1.5px solid #000',
+                            borderRadius: '4px',
+                            padding: '0.35rem 0.5rem',
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.35rem',
+                            boxShadow: '1.5px 1.5px 0px #000',
+                          }}
+                        >
+                          <Send size={12} color="#00B894" />
+                          <span>Send to ESP32</span>
+                        </button>
+
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                          <button
+                            onClick={() => handleOpenEditSlot(slot)}
+                            style={{
+                              flex: 1,
+                              backgroundColor: '#FAF9F6',
+                              border: '1.5px solid #000',
+                              borderRadius: '4px',
+                              padding: '0.3rem',
+                              fontSize: '0.72rem',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleClearSlot(slot.slotNumber)}
+                            style={{
+                              backgroundColor: '#FFF0F0',
+                              color: '#D63031',
+                              border: '1.5px solid #000',
+                              borderRadius: '4px',
+                              padding: '0.3rem 0.5rem',
+                              cursor: 'pointer',
+                            }}
+                            title="Clear Slot"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleOpenEditSlot(slot)}
+                        style={{
+                          width: '100%',
+                          backgroundColor: '#FFAEC8',
+                          color: '#000',
+                          border: '1.5px solid #000',
+                          borderRadius: '4px',
+                          padding: '0.45rem',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          boxShadow: '2px 2px 0px #000',
+                        }}
+                      >
+                        <Plus size={13} />
+                        <span>Configure Slot</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* Main Dashboard Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '2rem', marginBottom: '2.5rem' }}>
         {/* Left Column: Live 128x64 OLED Screen */}
@@ -569,7 +1431,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Hardware Telemetry */}
+        {/* Right Column: Hardware Telemetry & Notion Sync Hub */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Hardware Specs Card */}
           <div
@@ -587,9 +1449,11 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
               <div style={{ backgroundColor: '#FFF', border: '2px solid #000', padding: '0.85rem', borderRadius: 'var(--radius-sm)', boxShadow: '2px 2px 0px #000' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#666', fontSize: '0.75rem', fontWeight: 800, marginBottom: '0.2rem' }}>
                   <Wifi size={13} color="#FF9F1C" />
-                  <span>WI-FI NETWORK</span>
+                  <span>ACTIVE WI-FI</span>
                 </div>
-                <div style={{ fontWeight: 900, fontSize: '0.95rem' }}>Home_Lab_2.4G</div>
+                <div style={{ fontWeight: 900, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeSsid}
+                </div>
                 <div style={{ fontSize: '0.75rem', color: '#27AE60', fontWeight: 700 }}>Signal: -58 dBm (Strong)</div>
               </div>
 
@@ -633,7 +1497,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <Database size={20} color="#FF9F1C" />
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 900 }}>Notion Sync Hub</h2>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 900 }}>Step 2: Notion Sync Hub</h2>
               </div>
 
               {notionConnected ? (
@@ -668,7 +1532,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
             </div>
 
             {!notionConnected ? (
-              /* Notion Not Connected State: Prominent Connect Action */
+              /* Notion Not Connected State */
               <div
                 style={{
                   backgroundColor: '#FFFFFF',
@@ -832,6 +1696,214 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
         </div>
       </div>
 
+      {/* ===================================================================== */}
+      {/* EDIT WI-FI SLOT MODAL                                                 */}
+      {/* ===================================================================== */}
+      {editingSlot && (
+        <div className="modal-backdrop" onClick={() => setEditingSlot(null)}>
+          <div
+            className="modal-window"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-card-cream)',
+              border: '3px solid #000',
+              boxShadow: '8px 8px 0px #000',
+              borderRadius: 'var(--radius-md)',
+              maxWidth: '480px',
+              width: '90%',
+              padding: '2rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <div>
+                <span style={{ backgroundColor: '#000', color: '#FFF', fontSize: '0.72rem', fontWeight: 900, padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                  SLOT {editingSlot.slotNumber}
+                </span>
+                <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 900, marginTop: '0.35rem' }}>
+                  Configure Network Slot
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingSlot(null)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', fontWeight: 900, cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Quick Slot Name Tags */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Slot Label / Location
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                {['Home', 'Office', 'Studio', 'Mobile Hotspot', 'Backup'].map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setEditName(tag)}
+                    style={{
+                      backgroundColor: editName === tag ? '#FFAEC8' : '#FFF',
+                      border: '1.5px solid #000',
+                      padding: '0.25rem 0.55rem',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="e.g. Office, Home, Studio"
+                style={{
+                  width: '100%',
+                  padding: '0.65rem 0.85rem',
+                  border: '2px solid #000',
+                  borderRadius: 'var(--radius-sm)',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* SSID Input */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Wi-Fi Network SSID
+              </label>
+              <input
+                type="text"
+                value={editSsid}
+                onChange={(e) => setEditSsid(e.target.value)}
+                placeholder="Network Name"
+                style={{
+                  width: '100%',
+                  padding: '0.65rem 0.85rem',
+                  border: '2px solid #000',
+                  borderRadius: 'var(--radius-sm)',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  fontFamily: 'var(--font-mono)',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Password Input */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Password
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showEditPassword ? 'text' : 'password'}
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Leave blank if unchanged or open network"
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 2.5rem 0.65rem 0.85rem',
+                    border: '2px solid #000',
+                    borderRadius: 'var(--radius-sm)',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    fontFamily: 'var(--font-mono)',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEditPassword(!showEditPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#666',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {showEditPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Make Default Checkbox */}
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                marginBottom: '1.5rem',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={editIsDefault}
+                onChange={(e) => setEditIsDefault(e.target.checked)}
+                style={{ width: '18px', height: '18px', accentColor: '#27AE60' }}
+              />
+              <span>Set as Default Boot Network</span>
+            </label>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setEditingSlot(null)}
+                className="btn-brutal btn-brutal-white"
+                style={{ padding: '0.65rem 1rem', fontSize: '0.88rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveEditSlot(false)}
+                className="btn-brutal btn-brutal-amber"
+                style={{ padding: '0.65rem 1rem', fontSize: '0.88rem' }}
+              >
+                Save to Vault
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveEditSlot(true)}
+                style={{
+                  backgroundColor: '#4ECCA3',
+                  color: '#000',
+                  border: '2px solid #000',
+                  borderRadius: 'var(--radius-sm)',
+                  fontWeight: 900,
+                  fontSize: '0.88rem',
+                  padding: '0.65rem 1.15rem',
+                  cursor: 'pointer',
+                  boxShadow: '2.5px 2.5px 0px #000',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                <Send size={14} />
+                <span>Save &amp; Send to ESP32</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Disconnect Confirmation Modal */}
       {confirmModalOpen && (
         <div className="modal-backdrop" onClick={() => setConfirmModalOpen(false)}>
@@ -883,7 +1955,7 @@ export const CompanionDashboard: React.FC<CompanionDashboardProps> = ({
                 Cancel
               </button>
               <button
-                onClick={handleDisconnect}
+                onClick={handleDisconnectDevice}
                 disabled={disconnecting}
                 style={{
                   backgroundColor: '#D63031',

@@ -233,8 +233,8 @@ export interface NotionAuthorizeResult {
 
 export interface NotionCallbackPayload {
   code: string;
-  state: string;
-  deviceId: DeviceId;
+  state?: string;
+  deviceId?: DeviceId;
   redirectUri?: string;
 }
 
